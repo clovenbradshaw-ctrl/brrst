@@ -1768,6 +1768,19 @@ async function actionUnsubscribe(fid) {
   await store.dispatch(OP.DES, 'feeds', { feedId: fid });
 }
 
+// Reclassify a feed between the 'news' and 'podcast' tabs. Auto-detection
+// keys off itunes:* tags and audio enclosures, which sometimes guesses wrong
+// (audio-heavy news feeds, talk shows without enclosures, etc.) — this is
+// the manual override.
+async function actionSetFeedKind(fid, kind) {
+  if (kind !== 'news' && kind !== 'podcast') return;
+  const cur = store.state.feeds[fid];
+  if (!cur || cur.kind === kind) return;
+  const next = { ...cur, kind };
+  await IDB.putFeed(next);
+  await store.dispatch(OP.INS, 'feeds', { feed: next });
+}
+
 async function actionRefresh(fid) {
   const feed = store.state.feeds[fid];
   if (!feed) return;
@@ -1848,6 +1861,9 @@ const Icon = ({ name, size = 18, className = '', stroke = 1.6 }) => {
     case 'external':     return <svg {...props}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>;
     case 'circle':       return <svg {...props}><circle cx="12" cy="12" r="9"/></svg>;
     case 'circle-dot':   return <svg {...props}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>;
+    case 'more':         return <svg {...props}><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>;
+    case 'trash':        return <svg {...props}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>;
+    case 'swap':         return <svg {...props}><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>;
     default: return null;
   }
 };
@@ -2676,6 +2692,120 @@ const FEED_SORT_OPTS = [
   { k: 'duration', label: 'longest first' },
 ];
 
+// Thumbnail card for a subscribed feed. Tapping the image opens the profile;
+// the corner ⋯ button opens an action menu (move/delete) so the user can
+// reclassify a misdetected feed or unsubscribe without drilling in. The
+// menu renders via a portal because the strip uses overflow-x:auto, which
+// would otherwise clip the popover vertically.
+function SourceCard({ feed, onOpen, theme = 'dark' }) {
+  const [menu, setMenu] = useState(false);
+  const [menuPos, setMenuPos] = useState(null);
+  const triggerRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const handler = (e) => {
+      const inTrigger = triggerRef.current && triggerRef.current.contains(e.target);
+      const inMenu = menuRef.current && menuRef.current.contains(e.target);
+      if (!inTrigger && !inMenu) setMenu(false);
+    };
+    const esc = (e) => { if (e.key === 'Escape') setMenu(false); };
+    const onScroll = () => setMenu(false);
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler, { passive: true });
+    document.addEventListener('keydown', esc);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+      document.removeEventListener('keydown', esc);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [menu]);
+
+  const isPodcast = feed.kind === 'podcast';
+  const targetKind = isPodcast ? 'news' : 'podcast';
+  const targetLabel = isPodcast ? 'news' : 'podcasts';
+
+  const isLight = theme === 'light';
+  const tileBg = isLight
+    ? 'bg-ink/5 border border-ink/10'
+    : 'bg-ink3 cover-shadow';
+  const titleClass = isLight ? 'text-ink' : 'text-paper';
+  const metaClass  = isLight ? 'text-ink/45' : 'text-mute2';
+  const fallback   = isLight ? 'text-ink/30' : 'text-mute2';
+  const menuPanel  = isLight
+    ? 'bg-paper border border-ink/15 text-ink'
+    : 'ink2 border border-paper/15 text-paper';
+  const menuMove   = isLight ? 'hover:bg-ink/5' : 'hover:bg-paper/10';
+  const menuDel    = isLight ? 'text-rust hover:bg-rust/10' : 'text-rust hover:bg-rust/15';
+
+  const openMenu = (e) => {
+    e.stopPropagation();
+    if (menu) { setMenu(false); return; }
+    const r = triggerRef.current.getBoundingClientRect();
+    const W = 176; // matches w-44
+    const left = Math.min(window.innerWidth - W - 8, r.right - W);
+    const top = r.bottom + 4;
+    setMenuPos({ top, left: Math.max(8, left) });
+    setMenu(true);
+  };
+
+  const handleMove = async () => {
+    setMenu(false);
+    try { await actionSetFeedKind(feed.id, targetKind); }
+    catch (e) { console.warn('move feed failed:', e); }
+  };
+  const handleDelete = () => {
+    setMenu(false);
+    if (confirm(`Unsubscribe from "${feed.title}"?`)) actionUnsubscribe(feed.id);
+  };
+
+  return (
+    <div className="flex-shrink-0 w-32 sm:w-36 relative">
+      <button onClick={() => onOpen(feed.id)} className="block text-left tap w-full">
+        <div className={`aspect-square mb-2 overflow-hidden rounded-2xl ${tileBg}`}>
+          {feed.image ? (
+            <img src={feed.image} alt={feed.title} className="w-full h-full object-cover" loading="lazy" />
+          ) : (
+            <div className={`w-full h-full flex items-center justify-center ${fallback}`}>
+              <Icon name={isPodcast ? 'mic' : 'external'} size={24} />
+            </div>
+          )}
+        </div>
+        <div className={`text-[13px] font-medium leading-snug clamp-2 ${titleClass}`}>{feed.title}</div>
+        <div className={`eo text-[9px] ${metaClass} uppercase tracking-[0.12em] mt-1 clamp-1`}>{feed.author || shortUrl(feed.url)}</div>
+      </button>
+      <button
+        ref={triggerRef}
+        onClick={openMenu}
+        aria-label={`Actions for ${feed.title}`}
+        className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/55 text-white flex items-center justify-center backdrop-blur-sm hover:bg-black/75 tap">
+        <Icon name="more" size={14} />
+      </button>
+      {menu && menuPos && ReactDOM.createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: 176, zIndex: 1000 }}
+          className={`rounded-xl py-1 shadow-xl fade-in ${menuPanel}`}>
+          <button onClick={handleMove}
+            className={`w-full text-left px-3 py-2 text-[12.5px] eo tracking-tight flex items-center gap-2 ${menuMove}`}>
+            <Icon name="swap" size={14} />
+            move to {targetLabel}
+          </button>
+          <button onClick={handleDelete}
+            className={`w-full text-left px-3 py-2 text-[12.5px] eo tracking-tight flex items-center gap-2 ${menuDel}`}>
+            <Icon name="trash" size={14} />
+            delete
+          </button>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
 function NewsView({ openItemId, setOpenItemId, openFeedId, setOpenFeedId }) {
   const state = useStoreState();
   const openItem = openItemId ? state.items[openItemId] : null;
@@ -2715,19 +2845,7 @@ function NewsView({ openItemId, setOpenItemId, openFeedId, setOpenFeedId }) {
             </div>
             <div className="flex gap-3 overflow-x-auto clean-scroll pb-1 -mx-4 px-4 sm:mx-0 sm:px-0">
               {newsFeeds.map(f => (
-                <button key={f.id} onClick={() => setOpenFeedId(f.id)} className="flex-shrink-0 w-32 sm:w-36 text-left tap">
-                  <div className="aspect-square mb-2 overflow-hidden rounded-2xl bg-ink/5 border border-ink/10">
-                    {f.image ? (
-                      <img src={f.image} alt={f.title} className="w-full h-full object-cover" loading="lazy" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-ink/30">
-                        <Icon name="external" size={24} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-[13px] font-medium leading-snug clamp-2 text-ink">{f.title}</div>
-                  <div className="eo text-[9px] text-ink/45 uppercase tracking-[0.12em] mt-1 clamp-1">{f.author || shortUrl(f.url)}</div>
-                </button>
+                <SourceCard key={f.id} feed={f} onOpen={setOpenFeedId} theme="light" />
               ))}
             </div>
           </section>
@@ -2859,19 +2977,7 @@ function PodsView({ openFeedId, setOpenFeedId }) {
         </div>
         <div className="flex gap-3 overflow-x-auto clean-scroll pb-2 -mx-4 px-4 sm:-mx-6 sm:px-6">
           {podcastFeeds.map(f => (
-            <button key={f.id} onClick={() => setOpenFeedId(f.id)} className="flex-shrink-0 w-32 sm:w-36 text-left tap">
-              <div className="aspect-square cover-shadow bg-ink3 mb-2 overflow-hidden rounded-2xl">
-                {f.image ? (
-                  <img src={f.image} alt={f.title} className="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-mute2">
-                    <Icon name="mic" size={28} />
-                  </div>
-                )}
-              </div>
-              <div className="text-[13px] font-medium leading-snug clamp-2">{f.title}</div>
-              <div className="eo text-[9px] text-mute2 uppercase tracking-[0.12em] mt-1 clamp-1">{f.author || shortUrl(f.url)}</div>
-            </button>
+            <SourceCard key={f.id} feed={f} onOpen={setOpenFeedId} theme="dark" />
           ))}
         </div>
       </section>
@@ -2974,6 +3080,14 @@ function FeedDetail({ feed, onClose, onOpenItem }) {
     if (confirm(`Unsubscribe from "${feed.title}"?`)) { actionUnsubscribe(feed.id); onClose(); }
   };
 
+  const targetKind = isPodcast ? 'news' : 'podcast';
+  const targetLabel = isPodcast ? 'news' : 'podcasts';
+  const move = async () => {
+    if (!confirm(`Move "${feed.title}" to ${targetLabel}?`)) return;
+    try { await actionSetFeedKind(feed.id, targetKind); onClose(); }
+    catch (e) { console.warn('move feed failed:', e); }
+  };
+
   if (!isPodcast) {
     return (
       <div className="paper-grain text-ink min-h-full fade-in">
@@ -2985,8 +3099,15 @@ function FeedDetail({ feed, onClose, onOpenItem }) {
             <button onClick={refresh} disabled={refreshing} className={`text-ink/60 hover:text-ink tap ${refreshing ? 'animate-spin' : ''}`}>
               <Icon name="refresh" size={18} />
             </button>
-            <button onClick={unsubscribe} className="eo text-[11px] uppercase tracking-[0.18em] text-ink/60 hover:text-rust tap">
-              DES
+            <button onClick={move}
+              title={`Move to ${targetLabel}`}
+              className="eo text-[11px] uppercase tracking-[0.18em] text-ink/60 hover:text-moss tap flex items-center gap-1">
+              <Icon name="swap" size={14} /> MOV
+            </button>
+            <button onClick={unsubscribe}
+              title="Delete (unsubscribe)"
+              className="eo text-[11px] uppercase tracking-[0.18em] text-ink/60 hover:text-rust tap flex items-center gap-1">
+              <Icon name="trash" size={14} /> DES
             </button>
           </div>
         </div>
@@ -3038,9 +3159,15 @@ function FeedDetail({ feed, onClose, onOpenItem }) {
           <button onClick={refresh} disabled={refreshing} className={`text-paper/60 hover:text-paper tap ${refreshing ? 'animate-spin' : ''}`}>
             <Icon name="refresh" size={18} />
           </button>
+          <button onClick={move}
+            title={`Move to ${targetLabel}`}
+            className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-moss tap flex items-center gap-1">
+            <Icon name="swap" size={14} /> MOV
+          </button>
           <button onClick={unsubscribe}
-            className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-moss tap">
-            DES
+            title="Delete (unsubscribe)"
+            className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-rust tap flex items-center gap-1">
+            <Icon name="trash" size={14} /> DES
           </button>
         </div>
       </div>
@@ -3369,6 +3496,9 @@ function Drawer({ open, onClose }) {
             </button>
           </section>
 
+          {/* Force update from origin (e.g. GitHub Pages) */}
+          <UpdatePanel />
+
           {/* Stats */}
           <Stats />
 
@@ -3383,6 +3513,54 @@ function Drawer({ open, onClose }) {
       </div>
       <EOLogRibbon visible={showLog} onClose={() => setShowLog(false)} />
     </div>
+  );
+}
+
+function UpdatePanel() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
+
+  // Service workers don't run on file:// — surfacing the button there would
+  // just confuse users.
+  const supported = typeof navigator !== 'undefined'
+    && 'serviceWorker' in navigator
+    && /^https?:$/.test(location.protocol);
+
+  if (!supported) return null;
+
+  const handleForceUpdate = async () => {
+    if (busy) return;
+    const ok = window.confirm(
+      'Force-fetch the latest brrst from the server?\n\n'
+      + 'This clears the offline app cache and reloads the page. '
+      + 'Your feeds, settings, and Matrix session stay put.'
+    );
+    if (!ok) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await window.brrstForceReload();
+      // brrstForceReload reloads the page, so we shouldn't reach here.
+    } catch (e) {
+      setErr(e?.message || String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section>
+      <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-2">app updates</div>
+      <button
+        onClick={handleForceUpdate}
+        disabled={busy}
+        className="w-full py-2.5 border border-paper/20 text-paper/80 eo text-[11px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full disabled:opacity-50">
+        {busy ? 'reloading…' : 'force update from origin'}
+      </button>
+      <p className="text-[11px] text-mute mt-2 leading-relaxed">
+        Drops the cached app shell and re-downloads brrst from {location.host || 'origin'}. Use this when a new version has shipped but the PWA is still serving an old build.
+      </p>
+      {err && <div className="text-[11px] text-red-400 mt-2">{err}</div>}
+    </section>
   );
 }
 
@@ -3895,6 +4073,50 @@ window.brrst = { store, IDB, Matrix, OP, OP_GLYPH, makeEvent, fold, replay, fetc
       });
     });
   }
+
+  // Force-reload escape hatch: clears the SW cache, unregisters every worker
+  // in scope, then reloads from origin (GitHub Pages or wherever the PWA is
+  // hosted). IndexedDB and localStorage are deliberately left intact so the
+  // user keeps their feeds, settings, and Matrix session.
+  window.brrstForceReload = async function brrstForceReload() {
+    const log = (...args) => console.info('[brrst][force-reload]', ...args);
+    try {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        const sw = reg && (reg.active || reg.waiting || reg.installing);
+        if (sw) {
+          await new Promise((resolve) => {
+            const ch = new MessageChannel();
+            const timer = setTimeout(resolve, 2000);
+            ch.port1.onmessage = (e) => {
+              clearTimeout(timer);
+              log('sw cleared caches:', e.data);
+              resolve();
+            };
+            try { sw.postMessage('CLEAR_CACHES', [ch.port2]); }
+            catch (err) { clearTimeout(timer); log('postMessage failed:', err); resolve(); }
+          });
+        }
+      }
+      if ('caches' in self) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        log('deleted caches:', keys);
+      }
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+        log('unregistered workers:', regs.length);
+      }
+    } catch (err) {
+      console.warn('[brrst][force-reload] cleanup failed, reloading anyway:', err);
+    }
+    // Cache-bust the navigation itself in case an intermediate proxy or the
+    // browser's HTTP cache still holds the old shell.
+    const url = new URL(location.href);
+    url.searchParams.set('_brrst_reload', Date.now().toString(36));
+    location.replace(url.toString());
+  };
 </script>
 </body>
 </html>

@@ -39,7 +39,29 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+    return;
+  }
+  // Force-update path: drop every cache this SW owns so the next navigation
+  // re-fetches from origin (GitHub Pages, etc.). The page then unregisters
+  // this worker and reloads.
+  if (event.data === 'CLEAR_CACHES') {
+    const reply = (ok, error) => {
+      if (event.source && event.source.postMessage) {
+        event.source.postMessage({ type: 'CACHES_CLEARED', ok, error });
+      }
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ type: 'CACHES_CLEARED', ok, error });
+      }
+    };
+    event.waitUntil(
+      caches.keys()
+        .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+        .then(() => reply(true))
+        .catch((err) => reply(false, String(err && err.message || err)))
+    );
+  }
 });
 
 function isNavigationRequest(request) {
