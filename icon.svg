@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="brrst">
+  <rect width="512" height="512" rx="96" ry="96" fill="#0e110d"/>
+  <g fill="none" stroke="#a3b88a" stroke-width="6" opacity="0.35">
+    <circle cx="256" cy="256" r="192"/>
+    <circle cx="256" cy="256" r="148"/>
+  </g>
+  <text x="256" y="372" text-anchor="middle"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-weight="900" font-size="360" fill="#efe8d6" letter-spacing="-12">b</text>
+  <circle cx="370" cy="356" r="22" fill="#c9a96b"/>
+</svg>
