@@ -1,0 +1,3745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>brrst — reader / listener</title>
+<meta name="description" content="A reader and podcast listener. Yours, not theirs. Local-first, Matrix-synced, EO-notarized.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+          mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+        },
+        colors: {
+          ink:   '#0e110d',
+          ink2:  '#161a14',
+          ink3:  '#222820',
+          ink4:  '#2d342a',
+          paper: '#efe8d6',
+          paper2:'#e2d9c2',
+          moss:  '#a3b88a',
+          moss2: '#7d9468',
+          ochre: '#c9a96b',
+          rust:  '#c47a4a',
+          mute:  '#827e6e',
+          mute2: '#4d4d44',
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  :root {
+    --ink:    #0e110d;
+    --ink2:   #161a14;
+    --ink3:   #222820;
+    --ink4:   #2d342a;
+    --paper:  #efe8d6;
+    --paper2: #e2d9c2;
+    --moss:   #a3b88a;
+    --moss2:  #7d9468;
+    --ochre:  #c9a96b;
+    --rust:   #c47a4a;
+    --mute:   #827e6e;
+    --mute2:  #4d4d44;
+    --line:        rgba(239, 232, 214, 0.06);
+    --line-strong: rgba(239, 232, 214, 0.13);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+    text-rendering: optimizeLegibility;
+  }
+  body { min-height: 100vh; min-height: 100dvh; }
+
+  /* paper / ink containers */
+  .paper { background: var(--paper); color: var(--ink); }
+  .ink { background: var(--ink); color: var(--paper); }
+  .ink2 { background: var(--ink2); }
+  .ink3 { background: var(--ink3); }
+
+  /* tasteful newsprint feel for paper surfaces */
+  .paper-grain {
+    background-color: var(--paper);
+    background-image:
+      radial-gradient(at 15% 20%, rgba(125, 148, 104, 0.06) 0px, transparent 55%),
+      radial-gradient(at 85% 80%, rgba(196, 122, 74, 0.04) 0px, transparent 55%),
+      radial-gradient(at 50% 50%, rgba(0,0,0,0.015) 0px, transparent 70%);
+  }
+
+  /* rules */
+  .rule { border-color: var(--line); }
+  .rule-strong { border-color: var(--line-strong); }
+  .double-rule {
+    border-top: 1px solid var(--line-strong);
+    box-shadow: 0 2px 0 -1px var(--line);
+  }
+
+  /* eo notation badge */
+  .eo {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+  }
+  .eo-op {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    font-size: 0.7rem;
+  }
+
+  /* drop cap for first paragraphs */
+  .dropcap::first-letter {
+    font-weight: 800;
+    float: left;
+    font-size: 3.4rem;
+    line-height: 0.85;
+    margin-right: 0.5rem;
+    margin-top: 0.5rem;
+    color: var(--moss2);
+    letter-spacing: -0.04em;
+  }
+
+  /* range slider (player progress) */
+  input[type="range"].seek {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 18px;
+    background: transparent;
+    cursor: pointer;
+  }
+  input[type="range"].seek::-webkit-slider-runnable-track {
+    height: 2px;
+    background: rgba(245, 240, 230, 0.16);
+  }
+  input[type="range"].seek::-moz-range-track {
+    height: 2px;
+    background: rgba(245, 240, 230, 0.16);
+  }
+  input[type="range"].seek::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--moss);
+    margin-top: -6px;
+    border: none;
+    box-shadow: 0 0 0 4px rgba(163, 184, 138, 0.18);
+  }
+  input[type="range"].seek::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--moss);
+    border: none;
+  }
+
+  /* clean scroll */
+  .clean-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+  .clean-scroll::-webkit-scrollbar-thumb { background: rgba(245,240,230,0.12); border-radius: 2px; }
+  .clean-scroll::-webkit-scrollbar-track { background: transparent; }
+
+  /* page transitions */
+  .fade-in { animation: fadeIn 0.25s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ledger blink */
+  .blink-cursor::after {
+    content: '▌';
+    color: var(--moss);
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+
+  /* cover art shadow */
+  .cover-shadow { box-shadow: 0 14px 32px rgba(0,0,0,0.45), 0 4px 12px rgba(0,0,0,0.35); border-radius: 14px; }
+
+  /* line clamp helpers */
+  .clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* tap feedback */
+  .tap { transition: opacity 0.15s, transform 0.15s; }
+  .tap:active { opacity: 0.7; transform: scale(0.98); }
+
+  /* glow for active player */
+  .pulse-moss { animation: pulseMoss 2.4s ease-in-out infinite; }
+  @keyframes pulseMoss { 0%, 100% { box-shadow: 0 0 0 0 rgba(163, 184, 138, 0.55); } 50% { box-shadow: 0 0 0 8px rgba(163, 184, 138, 0); } }
+
+  /* prose for article view */
+  .prose { font-family: 'Inter', system-ui, sans-serif; max-width: 38rem; }
+  .prose p { margin: 0.9em 0; line-height: 1.7; font-size: 1rem; color: rgba(0,0,0,0.78); }
+  .prose a { color: var(--moss2); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  .prose img { max-width: 100%; height: auto; margin: 1em 0; border-radius: 4px; }
+  .prose h1, .prose h2, .prose h3 { font-weight: 700; letter-spacing: -0.02em; margin-top: 1.6em; }
+  .prose blockquote { border-left: 2px solid var(--moss); padding-left: 1.1em; margin-left: 0; font-style: italic; color: var(--mute); }
+  .prose pre, .prose code { font-family: 'JetBrains Mono', monospace; font-size: 0.9em; background: rgba(0,0,0,0.05); padding: 0.1em 0.3em; border-radius: 2px; }
+
+  /* ios-style wiggle for nav reorder mode */
+  @keyframes wiggleA {
+    0%, 100% { transform: rotate(-1.2deg); }
+    50%      { transform: rotate(1.2deg); }
+  }
+  @keyframes wiggleB {
+    0%, 100% { transform: rotate(1.1deg); }
+    50%      { transform: rotate(-1.1deg); }
+  }
+  .wiggle-a { animation: wiggleA 0.32s ease-in-out infinite; transform-origin: center bottom; }
+  .wiggle-b { animation: wiggleB 0.34s ease-in-out infinite; transform-origin: center bottom; }
+
+  /* mast head */
+  /* hyphae sprout glyph — replaces the serif dot in the wordmark */
+  .sprout {
+    display: inline-block;
+    width: 0.7em; height: 0.7em;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 22 V11' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'/><path d='M12 12 C 8 11, 5 8, 5 5 C 8 5, 11 8, 12 12 Z' fill='black'/><path d='M12 14 C 16 13, 19 10, 19 7 C 16 7, 13 10, 12 14 Z' fill='black'/></svg>") center / contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 22 V11' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'/><path d='M12 12 C 8 11, 5 8, 5 5 C 8 5, 11 8, 12 12 Z' fill='black'/><path d='M12 14 C 16 13, 19 10, 19 7 C 16 7, 13 10, 12 14 Z' fill='black'/></svg>") center / contain no-repeat;
+    transform: translateY(0.05em);
+  }
+
+  /* mycelial divider — branching dotted line */
+  .myc-rule {
+    height: 14px;
+    background-image:
+      radial-gradient(circle at 50% 50%, var(--moss) 1px, transparent 1.4px),
+      radial-gradient(circle at 50% 50%, var(--moss) 0.6px, transparent 1px);
+    background-size: 18px 14px, 7px 14px;
+    background-position: 0 50%, 9px 50%;
+    background-repeat: repeat-x;
+    opacity: 0.32;
+  }
+
+  /* growing wordmark dot - subtle pulse */
+  .grow-dot { animation: grow 3.5s ease-in-out infinite; }
+  @keyframes grow { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.12); opacity: 1; } }
+
+  /* mycelial network background pattern - very subtle */
+  .myc-bg {
+    background-image:
+      radial-gradient(circle at 12% 18%, rgba(163, 184, 138, 0.04) 0px, transparent 18%),
+      radial-gradient(circle at 78% 28%, rgba(163, 184, 138, 0.03) 0px, transparent 22%),
+      radial-gradient(circle at 38% 78%, rgba(201, 169, 107, 0.03) 0px, transparent 20%);
+  }
+
+  .masthead-rule {
+    background: linear-gradient(to right, transparent, var(--line-strong) 20%, var(--line-strong) 80%, transparent);
+    height: 1px;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- React + Babel for JSX in single file -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- App code below -->
+<script type="text/babel" data-presets="env,react">
+'use strict';
+const { useState, useEffect, useRef, useMemo, useCallback, useReducer, createContext, useContext } = React;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONFIG  ▌ user-supplied values
+// ═══════════════════════════════════════════════════════════════════════════
+const CONFIG = {
+  // ─── proxy for fetching feeds (CORS workaround) ───
+  // Expected interface: GET ${PROXY_URL}?url=<encoded-feed-url> → returns raw XML/RSS body
+  // Easy n8n recipe: a webhook node that does HTTP Request → return as text
+  PROXY_URL: 'https://n8n.intelechia.com/webhook/feed',  // <-- swap if different
+  PROXY_PARAM: 'url',
+
+  // ─── matrix homeserver ───
+  MATRIX_HOMESERVER: 'https://app.aminoimmigration.com',
+  MATRIX_ROOM_TOPIC: 'brrst-user-data',
+  // custom matrix event types
+  EVT_TRACKER:  'org.eo.brrst.tracker',   // small events posted directly to room
+  EVT_SNAPSHOT: 'org.eo.brrst.snapshot',  // points to mxc:// blob in media store
+
+  // ─── snapshot policy ───
+  SNAPSHOT_EVERY_N_EVENTS: 50,
+  SNAPSHOT_EVERY_MS: 5 * 60 * 1000,  // 5 min
+
+  // ─── local store ───
+  IDB_NAME: 'brrst',
+  IDB_VERSION: 1,
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EO  ▌ emergent ontology event model
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  An EO event has THREE components:
+//    operator   — what kind of change   (NUL, SIG, DES, INS, SEG, CON, SYN, DEF, EVA, REC)
+//    site       — where it occurs       (e.g. "feeds", "episodes/<id>", "playback")
+//    resolution — how it resolves       ("committed", "pending", "rolled-back", ...)
+//
+//  In brrst:
+//    INS feeds          → subscribe to a feed
+//    DES feeds          → unsubscribe
+//    SIG playback       → playback position update
+//    SIG episodes/<id>  → mark played / unplayed
+//    SEG queue          → reorder queue
+//    CON playlists      → add episode to playlist
+//    DEF tags           → define a tag
+//    EVA episodes/<id>  → rate / star
+//    REC episodes/<id>  → save for later
+//    NUL                → genesis / reset
+// ═══════════════════════════════════════════════════════════════════════════
+
+const OP = Object.freeze({
+  NUL: 'NUL', SIG: 'SIG', DES: 'DES', INS: 'INS',
+  SEG: 'SEG', CON: 'CON', SYN: 'SYN',
+  DEF: 'DEF', EVA: 'EVA', REC: 'REC',
+});
+
+// formal-logic glyph hints (display only)
+const OP_GLYPH = {
+  DEF: '⊢', EVA: '⊨', REC: '↬',
+  INS: '+', DES: '−', SIG: '~',
+  SEG: '|', CON: '∘', SYN: '∑', NUL: '∅',
+};
+
+// human label for ribbon
+const OP_NAME = {
+  INS: 'instantiate', DES: 'designate-end', SIG: 'signal',
+  SEG: 'segment', CON: 'connect', SYN: 'synthesize',
+  DEF: 'define', EVA: 'evaluate', REC: 'recommend', NUL: 'null',
+};
+
+let _seqCounter = 0;
+const _now = () => Date.now();
+const _uid = () => (crypto?.randomUUID?.() ?? (Math.random().toString(36).slice(2) + _now().toString(36)));
+
+function makeEvent(op, site, payload, meta = {}) {
+  _seqCounter += 1;
+  const ts = _now();
+  const id = _uid();
+  return {
+    id,
+    seq: _seqCounter,
+    ts,
+    op,
+    site,
+    payload: payload ?? null,
+    resolution: meta.resolution ?? 'committed',
+    notation: renderNotation(op, site, payload),
+    source: meta.source ?? 'local',
+  };
+}
+
+function renderNotation(op, site, payload) {
+  const tag = payload?.id ? `[${String(payload.id).slice(0,8)}]` : (payload?.url ? `[${shortUrl(payload.url)}]` : '');
+  return `${op} ${site}${tag}`;
+}
+
+function shortUrl(u) {
+  try { const h = new URL(u).hostname.replace(/^www\./, ''); return h; } catch { return ''; }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  IDB  ▌ Given-Log + projected state in IndexedDB
+// ═══════════════════════════════════════════════════════════════════════════
+
+const IDB = (() => {
+  let _db = null;
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(CONFIG.IDB_NAME, CONFIG.IDB_VERSION);
+      req.onupgradeneeded = (ev) => {
+        const db = ev.target.result;
+        // append-only event log (the Given)
+        if (!db.objectStoreNames.contains('log')) {
+          const log = db.createObjectStore('log', { keyPath: 'seq', autoIncrement: true });
+          log.createIndex('byTs', 'ts');
+          log.createIndex('byOp', 'op');
+        }
+        // projected state — flat key/value rows
+        if (!db.objectStoreNames.contains('state')) {
+          db.createObjectStore('state', { keyPath: 'k' });
+        }
+        // feeds table
+        if (!db.objectStoreNames.contains('feeds')) {
+          const f = db.createObjectStore('feeds', { keyPath: 'id' });
+          f.createIndex('byKind', 'kind');
+        }
+        // episodes / articles
+        if (!db.objectStoreNames.contains('items')) {
+          const it = db.createObjectStore('items', { keyPath: 'id' });
+          it.createIndex('byFeed', 'feedId');
+          it.createIndex('byPub', 'pubTs');
+        }
+        // outbox: events not yet shipped to matrix
+        if (!db.objectStoreNames.contains('outbox')) {
+          db.createObjectStore('outbox', { keyPath: 'seq' });
+        }
+        // misc kv (auth, settings)
+        if (!db.objectStoreNames.contains('kv')) {
+          db.createObjectStore('kv', { keyPath: 'k' });
+        }
+      };
+      req.onsuccess = () => { _db = req.result; resolve(_db); };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function tx(stores, mode, fn) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(stores, mode);
+      const result = fn(t);
+      t.oncomplete = () => resolve(result);
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
+    });
+  }
+
+  function reqP(req) { return new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); }); }
+
+  return {
+    open,
+    // Given-Log
+    appendLog: (ev) => tx(['log', 'outbox'], 'readwrite', t => {
+      t.objectStore('log').put(ev);
+      t.objectStore('outbox').put(ev);
+    }),
+    // bulk append from sync
+    bulkAppendLog: (events) => tx(['log'], 'readwrite', t => {
+      const store = t.objectStore('log');
+      for (const ev of events) store.put(ev);
+    }),
+    readLog: async (limit = 1000) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['log'], 'readonly');
+        const store = t.objectStore('log');
+        const req = store.getAll();
+        req.onsuccess = () => res(req.result.slice(-limit));
+        req.onerror = () => rej(req.error);
+      });
+    },
+    maxSeq: async () => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['log'], 'readonly');
+        const store = t.objectStore('log');
+        const req = store.openCursor(null, 'prev');
+        req.onsuccess = () => res(req.result ? req.result.value.seq : 0);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    // outbox (unshipped events)
+    readOutbox: async () => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['outbox'], 'readonly');
+        const req = t.objectStore('outbox').getAll();
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    clearOutbox: (seqs) => tx(['outbox'], 'readwrite', t => {
+      const store = t.objectStore('outbox');
+      for (const seq of seqs) store.delete(seq);
+    }),
+    // feeds
+    putFeed: (feed) => tx(['feeds'], 'readwrite', t => t.objectStore('feeds').put(feed)),
+    deleteFeed: (id) => tx(['feeds'], 'readwrite', t => t.objectStore('feeds').delete(id)),
+    getFeeds: async () => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['feeds'], 'readonly');
+        const req = t.objectStore('feeds').getAll();
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    // items
+    putItem: (item) => tx(['items'], 'readwrite', t => t.objectStore('items').put(item)),
+    putItems: (items) => tx(['items'], 'readwrite', t => {
+      const store = t.objectStore('items');
+      for (const it of items) store.put(it);
+    }),
+    getItemsByFeed: async (feedId) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['items'], 'readonly');
+        const idx = t.objectStore('items').index('byFeed');
+        const req = idx.getAll(feedId);
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    getAllItems: async () => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['items'], 'readonly');
+        const req = t.objectStore('items').getAll();
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    deleteItemsByFeed: async (feedId) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['items'], 'readwrite');
+        const idx = t.objectStore('items').index('byFeed');
+        const req = idx.openCursor(feedId);
+        req.onsuccess = (e) => {
+          const cur = e.target.result;
+          if (cur) { cur.delete(); cur.continue(); } else res();
+        };
+        req.onerror = () => rej(req.error);
+      });
+    },
+    // state kv
+    getState: async (k) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['state'], 'readonly');
+        const req = t.objectStore('state').get(k);
+        req.onsuccess = () => res(req.result?.v ?? null);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    setState: (k, v) => tx(['state'], 'readwrite', t => t.objectStore('state').put({ k, v })),
+    // generic kv
+    getKv: async (k) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['kv'], 'readonly');
+        const req = t.objectStore('kv').get(k);
+        req.onsuccess = () => res(req.result?.v ?? null);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    setKv: (k, v) => tx(['kv'], 'readwrite', t => t.objectStore('kv').put({ k, v })),
+  };
+})();
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RSS  ▌ feed parser with proper iTunes namespace handling
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  Lessons from prior brrst iterations: standard querySelector() does NOT
+//  pick up <itunes:image> et al. because those are namespaced. We must use
+//  getElementsByTagNameNS or match by local-name.
+//
+//  Image priority for podcast episodes:
+//    1. item-level <itunes:image href>
+//    2. item-level <media:thumbnail>
+//    3. item-level <media:content type="image/*">
+//    4. item-level <enclosure type="image/*">
+//    5. first <img> in <description>/<content:encoded>
+//    6. channel-level <itunes:image>
+//    7. channel-level <image><url>
+// ═══════════════════════════════════════════════════════════════════════════
+
+const NS = {
+  itunes: 'http://www.itunes.com/dtds/podcast-1.0.dtd',
+  media:  'http://search.yahoo.com/mrss/',
+  content:'http://purl.org/rss/1.0/modules/content/',
+  atom:   'http://www.w3.org/2005/Atom',
+  podcast:'https://podcastindex.org/namespace/1.0',
+  dc:     'http://purl.org/dc/elements/1.1/',
+};
+
+function getAllByLocalName(parent, localName) {
+  // works regardless of namespace prefix
+  const out = [];
+  const walker = (node) => {
+    if (!node) return;
+    if (node.localName === localName) out.push(node);
+    if (node.children) for (const c of node.children) walker(c);
+  };
+  walker(parent);
+  return out;
+}
+
+function getFirstByLocalName(parent, localName) {
+  const all = getAllByLocalName(parent, localName);
+  return all[0] || null;
+}
+
+function textOf(parent, localName) {
+  const el = getFirstByLocalName(parent, localName);
+  return el ? (el.textContent || '').trim() : '';
+}
+
+function attrOf(el, attr) {
+  return el?.getAttribute?.(attr) || '';
+}
+
+function extractImageFromHTML(html) {
+  if (!html) return '';
+  const m = String(html).match(/<img[^>]+src=["']([^"']+)["']/i);
+  return m ? m[1] : '';
+}
+
+function extractItemImage(item, channelImg) {
+  // 1. item itunes:image
+  const allItunesImg = getAllByLocalName(item, 'image');
+  for (const img of allItunesImg) {
+    const href = attrOf(img, 'href');
+    if (href) return href;
+    const url = textOf(img, 'url');
+    if (url) return url;
+  }
+  // 2. media:thumbnail
+  const thumbs = getAllByLocalName(item, 'thumbnail');
+  for (const t of thumbs) {
+    const url = attrOf(t, 'url') || (t.textContent || '').trim();
+    if (url) return url;
+  }
+  // 3. media:content with image type
+  const mcs = getAllByLocalName(item, 'content');
+  for (const mc of mcs) {
+    const type = attrOf(mc, 'type');
+    const url = attrOf(mc, 'url');
+    if (url && /^image\//.test(type)) return url;
+  }
+  // 4. enclosure with image type
+  const encs = getAllByLocalName(item, 'enclosure');
+  for (const e of encs) {
+    const type = attrOf(e, 'type');
+    const url = attrOf(e, 'url');
+    if (url && /^image\//.test(type)) return url;
+  }
+  // 5. img inside description/content:encoded
+  const descHtml = textOf(item, 'encoded') || textOf(item, 'description') || textOf(item, 'summary');
+  const fromHtml = extractImageFromHTML(descHtml);
+  if (fromHtml) return fromHtml;
+  // 6. channel fallback
+  return channelImg || '';
+}
+
+function extractEnclosure(item) {
+  const encs = getAllByLocalName(item, 'enclosure');
+  for (const e of encs) {
+    const type = attrOf(e, 'type');
+    const url = attrOf(e, 'url');
+    if (url && /^audio\//.test(type)) {
+      return { url, type, length: attrOf(e, 'length') };
+    }
+  }
+  // some feeds only have media:content audio
+  const mcs = getAllByLocalName(item, 'content');
+  for (const mc of mcs) {
+    const type = attrOf(mc, 'type');
+    const url = attrOf(mc, 'url');
+    if (url && /^audio\//.test(type)) {
+      return { url, type, length: attrOf(mc, 'fileSize') };
+    }
+  }
+  return null;
+}
+
+function extractDuration(item) {
+  // itunes:duration can be "HH:MM:SS", "MM:SS", or seconds
+  const d = textOf(item, 'duration');
+  if (!d) return 0;
+  if (/^\d+$/.test(d)) return parseInt(d, 10);
+  const parts = d.split(':').map(x => parseInt(x, 10) || 0);
+  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+  if (parts.length === 2) return parts[0]*60 + parts[1];
+  return 0;
+}
+
+function stripHtml(s) {
+  if (!s) return '';
+  const div = document.createElement('div');
+  div.innerHTML = s;
+  return (div.textContent || div.innerText || '').trim();
+}
+
+// HTML-only named entities that XML doesn't know about.
+// Note: amp/lt/gt/quot/apos are XML-standard and intentionally NOT in this map.
+const XML_HTML_ENTITIES = {
+  nbsp: '\u00a0',
+  copy: '©', reg: '®', trade: '™',
+  hellip: '…', mdash: '—', ndash: '–', minus: '−',
+  lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201c', rdquo: '\u201d',
+  sbquo: '\u201a', bdquo: '\u201e', prime: '′', Prime: '″',
+  laquo: '«', raquo: '»', lsaquo: '‹', rsaquo: '›',
+  middot: '·', bull: '•', sdot: '⋅',
+  euro: '€', pound: '£', yen: '¥', cent: '¢',
+  iexcl: '¡', iquest: '¿', sect: '§', para: '¶', deg: '°',
+  plusmn: '±', times: '×', divide: '÷',
+  sup2: '²', sup3: '³', frac12: '½', frac14: '¼', frac34: '¾',
+  agrave: 'à', aacute: 'á', auml: 'ä', acirc: 'â', atilde: 'ã', aring: 'å', aelig: 'æ',
+  egrave: 'è', eacute: 'é', euml: 'ë', ecirc: 'ê',
+  igrave: 'ì', iacute: 'í', iuml: 'ï', icirc: 'î',
+  ograve: 'ò', oacute: 'ó', ouml: 'ö', ocirc: 'ô', otilde: 'õ', oslash: 'ø', oelig: 'œ',
+  ugrave: 'ù', uacute: 'ú', uuml: 'ü', ucirc: 'û',
+  ntilde: 'ñ', ccedil: 'ç', szlig: 'ß',
+  Agrave: 'À', Aacute: 'Á', Auml: 'Ä', Acirc: 'Â', Atilde: 'Ã', Aring: 'Å', AElig: 'Æ',
+  Egrave: 'È', Eacute: 'É', Euml: 'Ë', Ecirc: 'Ê',
+  Igrave: 'Ì', Iacute: 'Í', Iuml: 'Ï', Icirc: 'Î',
+  Ograve: 'Ò', Oacute: 'Ó', Ouml: 'Ö', Ocirc: 'Ô', Otilde: 'Õ', Oslash: 'Ø', OElig: 'Œ',
+  Ugrave: 'Ù', Uacute: 'Ú', Uuml: 'Ü', Ucirc: 'Û',
+  Ntilde: 'Ñ', Ccedil: 'Ç',
+};
+
+// Sanitize XML bodies that contain unescaped ampersands or HTML named entities.
+// Common in RSS feeds with HTML payloads — This American Life, NYT podcasts,
+// many Substacks. Skips CDATA sections and comments since their contents are raw.
+function sanitizeXml(xml) {
+  if (!xml) return xml;
+  const parts = xml.split(/(<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->)/);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) return part;  // protected (CDATA or comment)
+    return part
+      // 1) translate HTML named entities to their unicode equivalents
+      .replace(/&([a-zA-Z][a-zA-Z0-9]*);/g, (m, name) =>
+        Object.prototype.hasOwnProperty.call(XML_HTML_ENTITIES, name)
+          ? XML_HTML_ENTITIES[name]
+          : m  // amp/lt/gt/quot/apos and unknown entities pass through
+      )
+      // 2) escape any bare & that isn't part of a valid entity ref
+      .replace(/&(?!(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;');
+  }).join('');
+}
+
+function parseFeed(xmlText, feedUrl) {
+  let txt = xmlText || '';
+  let doc = new DOMParser().parseFromString(txt, 'application/xml');
+  let errNode = doc.querySelector('parsererror');
+
+  // retry once with sanitization — fixes the vast majority of malformed RSS
+  // (bare ampersands inside HTML descriptions and URL query strings,
+  // unknown HTML named entities like &nbsp; &mdash; etc.)
+  if (errNode) {
+    const sanitized = sanitizeXml(txt);
+    if (sanitized !== txt) {
+      txt = sanitized;
+      doc = new DOMParser().parseFromString(txt, 'application/xml');
+      errNode = doc.querySelector('parsererror');
+    }
+  }
+
+  if (errNode) {
+    const head = txt.slice(0, 140).replace(/\s+/g, ' ');
+    const tail = txt.slice(-80).replace(/\s+/g, ' ');
+    const len  = txt.length;
+    const why  = (errNode.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+    if (typeof window !== 'undefined') {
+      window.brrst = window.brrst || {};
+      window.brrst.lastBadBody = xmlText;
+      window.brrst.lastBadFeed = feedUrl;
+    }
+    throw new Error(`xml parse failed (${len}b): ${why} ▸ head: "${head}…" ▸ tail: "…${tail}"`);
+  }
+
+  const isAtom = !!doc.querySelector('feed');
+  if (isAtom) return parseAtom(doc, feedUrl);
+  return parseRSS(doc, feedUrl);
+}
+
+function parseRSS(doc, feedUrl) {
+  const channel = doc.querySelector('channel');
+  if (!channel) throw new Error('No <channel> in feed');
+
+  const title = textOf(channel, 'title');
+  const description = stripHtml(textOf(channel, 'description') || textOf(channel, 'subtitle'));
+  const link = textOf(channel, 'link');
+  const author = textOf(channel, 'author') || textOf(channel, 'creator') || '';
+
+  // channel image: itunes:image then <image><url>
+  let channelImg = '';
+  const itImg = getFirstByLocalName(channel, 'image');
+  if (itImg) {
+    channelImg = attrOf(itImg, 'href') || textOf(itImg, 'url');
+  }
+
+  // detect kind: presence of <itunes:*> or audio enclosures => podcast, else news
+  const isPodcast = !!getFirstByLocalName(channel, 'duration')
+    || !!getFirstByLocalName(channel, 'episode')
+    || !!getFirstByLocalName(channel, 'category')
+    || channel.querySelectorAll('item enclosure[type^="audio"]').length > 0
+    || /podcast/i.test(channel.querySelector('generator')?.textContent || '');
+
+  const itemEls = Array.from(channel.querySelectorAll(':scope > item'));
+  const items = itemEls.map(item => {
+    const enc = extractEnclosure(item);
+    const itemTitle = textOf(item, 'title');
+    const itemLink = textOf(item, 'link');
+    const guid = textOf(item, 'guid') || itemLink || itemTitle + (textOf(item, 'pubDate') || '');
+    const pub = textOf(item, 'pubDate') || textOf(item, 'date');
+    const pubTs = pub ? Date.parse(pub) || 0 : 0;
+    const descHtml = textOf(item, 'encoded') || textOf(item, 'description') || textOf(item, 'summary');
+    const desc = stripHtml(descHtml);
+
+    return {
+      guid,
+      title: itemTitle,
+      link: itemLink,
+      pub,
+      pubTs,
+      descHtml,
+      desc,
+      image: extractItemImage(item, channelImg),
+      audio: enc?.url || null,
+      audioType: enc?.type || null,
+      audioLength: enc?.length || null,
+      duration: extractDuration(item),
+      author: textOf(item, 'creator') || textOf(item, 'author'),
+    };
+  });
+
+  return {
+    feed: {
+      url: feedUrl,
+      title,
+      description,
+      link,
+      author,
+      image: channelImg,
+      kind: isPodcast ? 'podcast' : 'news',
+    },
+    items,
+  };
+}
+
+function parseAtom(doc, feedUrl) {
+  const feed = doc.querySelector('feed');
+  const title = textOf(feed, 'title');
+  const description = stripHtml(textOf(feed, 'subtitle') || '');
+  const linkEl = Array.from(feed.children).find(c => c.localName === 'link' && (!c.getAttribute('rel') || c.getAttribute('rel') === 'alternate'));
+  const link = linkEl ? attrOf(linkEl, 'href') : '';
+  const author = textOf(feed, 'author');
+  const channelImg = textOf(feed, 'logo') || textOf(feed, 'icon') || '';
+
+  const entries = Array.from(feed.querySelectorAll(':scope > entry'));
+  const items = entries.map(entry => {
+    const itemTitle = textOf(entry, 'title');
+    const links = Array.from(entry.children).filter(c => c.localName === 'link');
+    const altLink = links.find(l => !l.getAttribute('rel') || l.getAttribute('rel') === 'alternate');
+    const itemLink = altLink ? attrOf(altLink, 'href') : '';
+    const guid = textOf(entry, 'id') || itemLink || itemTitle;
+    const pub = textOf(entry, 'published') || textOf(entry, 'updated');
+    const pubTs = pub ? Date.parse(pub) || 0 : 0;
+    const descHtml = textOf(entry, 'content') || textOf(entry, 'summary');
+    const desc = stripHtml(descHtml);
+    return {
+      guid, title: itemTitle, link: itemLink, pub, pubTs, descHtml, desc,
+      image: extractItemImage(entry, channelImg),
+      audio: null, audioType: null, audioLength: null, duration: 0,
+      author: textOf(entry, 'author'),
+    };
+  });
+
+  return {
+    feed: { url: feedUrl, title, description, link, author, image: channelImg, kind: 'news' },
+    items,
+  };
+}
+
+async function getProxyConfig() {
+  const url   = (await IDB.getKv('proxy.url'))   || CONFIG.PROXY_URL;
+  const param = (await IDB.getKv('proxy.param')) || CONFIG.PROXY_PARAM;
+  return { url, param };
+}
+
+async function fetchFeed(feedUrl) {
+  const { url: proxyUrl, param: proxyParam } = await getProxyConfig();
+  const url = `${proxyUrl}?${encodeURIComponent(proxyParam)}=${encodeURIComponent(feedUrl)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`proxy returned ${res.status}`);
+  let body = await res.text();
+
+  // stash raw for DevTools inspection
+  if (typeof window !== 'undefined') {
+    window.brrst = window.brrst || {};
+    window.brrst.lastRawBody  = body;
+    window.brrst.lastFeedUrl  = feedUrl;
+  }
+
+  // strip UTF-8 BOM if present (can break DOMParser if not at the very start)
+  if (body.charCodeAt(0) === 0xFEFF) body = body.slice(1);
+
+  // strip null bytes that can sneak in from misencoded streams
+  if (body.indexOf('\x00') !== -1) body = body.replace(/\x00/g, '');
+
+  // Defensive unwrap: some proxies (looking at you, n8n with default settings)
+  // return JSON-wrapped responses like {"data":"<?xml..."}  or  "<?xml..."
+  // (a JSON string with quotes). Unwrap before parsing.
+  const trimmed = body.trimStart();
+  if (trimmed.startsWith('{') || trimmed.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === 'string') {
+        body = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        body = parsed.data || parsed.body || parsed.xml || parsed.content || parsed.text || body;
+      }
+    } catch { /* not JSON, leave alone */ }
+  }
+
+  // strip any leading whitespace before the XML declaration
+  body = body.replace(/^\s+/, '');
+
+  return parseFeed(body, feedUrl);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  URL NORMALIZATION  ▌ make pasted URLs Just Work
+// ─────────────────────────────────────────────────────────────────────────
+
+const REDDIT_HOSTS = new Set(['reddit.com', 'www.reddit.com', 'old.reddit.com', 'np.reddit.com']);
+
+function normalizeFeedUrl(url) {
+  try {
+    const u = new URL(url);
+    // Reddit: append .rss to the path (preserves query strings like ?q=foo)
+    if (REDDIT_HOSTS.has(u.hostname) && !u.pathname.endsWith('.rss')) {
+      u.pathname = u.pathname.replace(/\/$/, '') + '.rss';
+      return u.toString();
+    }
+    // YouTube channels: convert /channel/UCxxx and /@handle URLs to feed URLs
+    if (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') {
+      const m = u.pathname.match(/^\/channel\/(UC[\w-]+)/);
+      if (m) return `https://www.youtube.com/feeds/videos.xml?channel_id=${m[1]}`;
+      // /@handle and /c/name are not directly feedable without resolving — leave for auto-discovery
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  OPML  ▌ parse curated feed lists & emit subscriptions for backup
+// ─────────────────────────────────────────────────────────────────────────
+
+function parseOPML(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText || '', 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('not valid OPML/XML');
+  const outlines = doc.querySelectorAll('outline');
+  const feeds = [];
+  const seen = new Set();
+  for (const ol of outlines) {
+    const url = ol.getAttribute('xmlUrl') || ol.getAttribute('xmlurl');
+    if (!url) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    // walk parents to assemble category path
+    const cats = [];
+    let p = ol.parentElement;
+    while (p && p.tagName?.toLowerCase() === 'outline' && !p.getAttribute('xmlUrl')) {
+      const c = p.getAttribute('text') || p.getAttribute('title');
+      if (c) cats.unshift(c);
+      p = p.parentElement;
+    }
+    feeds.push({
+      url,
+      title:    ol.getAttribute('title') || ol.getAttribute('text') || '',
+      htmlUrl:  ol.getAttribute('htmlUrl') || ol.getAttribute('htmlurl') || '',
+      category: cats.join(' / '),
+    });
+  }
+  return feeds;
+}
+
+function xmlEsc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildOPML(feeds) {
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<opml version="2.0">',
+    '  <head>',
+    '    <title>brrst subscriptions</title>',
+    `    <dateCreated>${new Date().toUTCString()}</dateCreated>`,
+    '  </head>',
+    '  <body>',
+  ];
+  // group by kind
+  const groups = { podcast: [], news: [] };
+  for (const f of feeds) (groups[f.kind] || groups.news).push(f);
+  for (const [kind, list] of Object.entries(groups)) {
+    if (list.length === 0) continue;
+    lines.push(`    <outline text="${kind === 'podcast' ? 'Podcasts' : 'News'}" title="${kind === 'podcast' ? 'Podcasts' : 'News'}">`);
+    for (const f of list) {
+      const t = xmlEsc(f.title || '');
+      const u = xmlEsc(f.url || '');
+      const h = xmlEsc(f.link || '');
+      const d = xmlEsc((f.description || '').slice(0, 240));
+      lines.push(`      <outline type="rss" text="${t}" title="${t}" xmlUrl="${u}" htmlUrl="${h}" description="${d}" />`);
+    }
+    lines.push('    </outline>');
+  }
+  lines.push('  </body>');
+  lines.push('</opml>');
+  return lines.join('\n');
+}
+
+async function importOPML(opmlText, onProgress) {
+  const incoming = parseOPML(opmlText);
+  const have = new Set(Object.values(store.state.feeds).map(f => normalizeFeedUrl(f.url)));
+  const todo = incoming.filter(f => !have.has(normalizeFeedUrl(f.url)));
+  let added = 0, failed = 0;
+  for (let i = 0; i < todo.length; i++) {
+    const f = todo[i];
+    onProgress?.({ stage: 'fetching', done: i, total: todo.length, added, failed, current: f.title || f.url });
+    try {
+      await actionSubscribe(f.url);
+      added++;
+    } catch (e) {
+      failed++;
+      console.warn('opml import failed:', f.url, e?.message || e);
+    }
+  }
+  const skipped = incoming.length - todo.length;
+  onProgress?.({ stage: 'done', done: todo.length, total: todo.length, added, failed, skipped });
+  return { added, skipped, failed, total: incoming.length };
+}
+
+function exportOPML() {
+  const feeds = Object.values(store.state.feeds);
+  const xml = buildOPML(feeds);
+  const blob = new Blob([xml], { type: 'text/x-opml; charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `brrst-subscriptions-${new Date().toISOString().slice(0, 10)}.opml`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  return feeds.length;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  NEWS DIRECTORY  ▌ baked-in catalog for news-tab search
+// ─────────────────────────────────────────────────────────────────────────
+//
+//  When the user is searching in News context, iTunes podcast results aren't
+//  useful — we want article feeds. This is a curated short list of well-known
+//  outlets that's instantly searchable by name. Users add their own via the
+//  search bar (paste URL or domain → auto-discovery handles it) or via OPML
+//  import from larger curated repos like awesome-rss-feeds.
+
+const NEWS_DIRECTORY = [
+  // National daily
+  { title: 'The New York Times',           url: 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml', category: 'national daily' },
+  { title: 'The Washington Post',          url: 'https://feeds.washingtonpost.com/rss/national',             category: 'national daily' },
+  { title: 'The Guardian (US)',            url: 'https://www.theguardian.com/us/rss',                        category: 'national daily' },
+  { title: 'NPR News',                     url: 'https://feeds.npr.org/1001/rss.xml',                        category: 'national daily' },
+  { title: 'BBC News',                     url: 'http://feeds.bbci.co.uk/news/rss.xml',                      category: 'international' },
+  { title: 'Al Jazeera English',           url: 'https://www.aljazeera.com/xml/rss/all.xml',                 category: 'international' },
+  { title: 'Reuters Top News',             url: 'https://feeds.reuters.com/reuters/topNews',                 category: 'international' },
+  { title: 'Financial Times',              url: 'https://www.ft.com/?format=rss',                            category: 'international' },
+
+  // Investigative & accountability
+  { title: 'ProPublica',                   url: 'https://www.propublica.org/feeds/propublica/main',          category: 'investigative' },
+  { title: 'The Intercept',                url: 'https://theintercept.com/feed/?lang=en',                    category: 'investigative' },
+  { title: 'The Markup',                   url: 'https://themarkup.org/feeds/rss.xml',                       category: 'investigative' },
+  { title: '404 Media',                    url: 'https://www.404media.co/rss/',                              category: 'investigative' },
+  { title: 'ICIJ',                         url: 'https://www.icij.org/feed/',                                category: 'investigative' },
+  { title: 'Bellingcat',                   url: 'https://www.bellingcat.com/feed/',                          category: 'investigative' },
+  { title: 'Reveal (CIR)',                 url: 'https://revealnews.org/feed/',                              category: 'investigative' },
+  { title: 'MuckRock',                     url: 'https://www.muckrock.com/news/rss/',                        category: 'investigative' },
+  { title: 'Truthout',                     url: 'https://truthout.org/feed/',                                category: 'investigative' },
+
+  // Tech & tech policy
+  { title: 'Wired',                        url: 'https://www.wired.com/feed/rss',                            category: 'tech' },
+  { title: 'The Verge',                    url: 'https://www.theverge.com/rss/index.xml',                    category: 'tech' },
+  { title: 'Ars Technica',                 url: 'https://feeds.arstechnica.com/arstechnica/index',           category: 'tech' },
+  { title: 'TechCrunch',                   url: 'https://techcrunch.com/feed/',                              category: 'tech' },
+  { title: 'Hacker News',                  url: 'https://news.ycombinator.com/rss',                          category: 'tech' },
+  { title: 'Lobsters',                     url: 'https://lobste.rs/rss',                                     category: 'tech' },
+  { title: 'Pluralistic (Cory Doctorow)',  url: 'https://pluralistic.net/feed/',                             category: 'tech' },
+  { title: 'Tech Policy Press',            url: 'https://www.techpolicy.press/feed/',                        category: 'tech policy' },
+  { title: 'EFF Deeplinks',                url: 'https://www.eff.org/rss/updates.xml',                       category: 'tech policy' },
+  { title: 'Citizen Lab',                  url: 'https://citizenlab.ca/feed/',                               category: 'tech policy' },
+
+  // Politics
+  { title: 'Politico',                     url: 'https://www.politico.com/rss/politicopicks.xml',            category: 'politics' },
+  { title: 'The Hill',                     url: 'https://thehill.com/feed/',                                 category: 'politics' },
+  { title: 'Talking Points Memo',          url: 'https://feeds.talkingpointsmemo.com/talkingpointsmemo',     category: 'politics' },
+  { title: 'Popular Information',          url: 'https://popular.info/feed',                                 category: 'politics' },
+
+  // Magazines / longform
+  { title: 'The New Yorker',               url: 'https://www.newyorker.com/feed/everything',                 category: 'longform' },
+  { title: 'The Atlantic',                 url: 'https://www.theatlantic.com/feed/all/',                     category: 'longform' },
+  { title: 'Harper\u2019s Magazine',       url: 'https://harpers.org/feed/',                                 category: 'longform' },
+  { title: 'New York Review of Books',     url: 'https://www.nybooks.com/feed/',                             category: 'longform' },
+  { title: 'n+1',                          url: 'https://www.nplusonemag.com/feed/',                         category: 'longform' },
+  { title: 'The Baffler',                  url: 'https://thebaffler.com/feed',                               category: 'longform' },
+
+  // Independent / labor / climate
+  { title: 'Defector',                     url: 'https://defector.com/feed',                                 category: 'independent' },
+  { title: 'Labor Notes',                  url: 'https://labornotes.org/rss.xml',                            category: 'labor' },
+  { title: 'In These Times',               url: 'https://inthesetimes.com/rss',                              category: 'labor' },
+  { title: 'Heated (Emily Atkin)',         url: 'https://heated.world/feed',                                 category: 'climate' },
+  { title: 'Inside Climate News',          url: 'https://insideclimatenews.org/feed/',                       category: 'climate' },
+
+  // Media / commentary newsletters
+  { title: 'Status (Oliver Darcy)',        url: 'https://www.status.news/feed',                              category: 'media' },
+  { title: 'Garbage Day (Ryan Broderick)', url: 'https://www.garbageday.email/feed',                         category: 'media' },
+  { title: 'The Honest Broker',            url: 'https://www.honest-broker.com/feed',                        category: 'culture' },
+
+  // Local — Nashville
+  { title: 'Nashville Banner',             url: 'https://nashvillebanner.com/feed/',                         category: 'local · nashville' },
+  { title: 'Nashville Scene',              url: 'https://www.nashvillescene.com/?fa=rss',                    category: 'local · nashville' },
+  { title: 'Tennessee Lookout',            url: 'https://tennesseelookout.com/feed/',                        category: 'local · nashville' },
+  { title: 'WPLN News',                    url: 'https://wpln.org/feed/',                                    category: 'local · nashville' },
+
+  // Substack / journalist self-publish
+  { title: 'Read Rich Text',               url: 'https://readrichtext.substack.com/feed',                    category: 'substack' },
+];
+
+function searchNewsDirectory(query) {
+  const q = query.toLowerCase();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return NEWS_DIRECTORY
+    .map(entry => {
+      const hay = (entry.title + ' ' + entry.category + ' ' + entry.url).toLowerCase();
+      let score = 0;
+      for (const t of tokens) {
+        if (entry.title.toLowerCase().includes(t)) score += 3;     // title weighted higher
+        else if (hay.includes(t)) score += 1;
+      }
+      return { ...entry, _score: score };
+    })
+    .filter(e => e._score > 0)
+    .sort((a, b) => b._score - a._score)
+    .slice(0, 12);
+}
+
+function classifyInput(raw) {
+  const s = (raw || '').trim();
+  if (!s) return { kind: 'empty' };
+  if (/^https?:\/\//i.test(s)) return { kind: 'url', value: s };
+  if (/^([\w-]+\.)+[a-z]{2,}(\/.*)?$/i.test(s) && !/\s/.test(s)) {
+    return { kind: 'domain', value: s };
+  }
+  return { kind: 'query', value: s };
+}
+
+// iTunes Search API — no auth, CORS-enabled, returns RSS feedUrl
+async function searchItunesPodcasts(query, limit = 10) {
+  const url = `https://itunes.apple.com/search?media=podcast&entity=podcast&limit=${limit}&term=${encodeURIComponent(query)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`itunes ${res.status}`);
+  const data = await res.json();
+  return (data.results || [])
+    .filter(r => r.feedUrl)
+    .map(r => ({
+      title:    r.trackName || r.collectionName,
+      author:   r.artistName,
+      feedUrl:  r.feedUrl,
+      image:    r.artworkUrl600 || r.artworkUrl100,
+      genre:    r.primaryGenreName,
+      itunesId: r.collectionId,
+    }));
+}
+
+// Auto-discovery — fetch a site's HTML through the proxy, scan for <link rel="alternate">
+async function discoverFeedsFromSite(siteUrl) {
+  let url = (siteUrl || '').trim();
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  const { url: proxyUrl, param: proxyParam } = await getProxyConfig();
+  const fetchUrl = `${proxyUrl}?${encodeURIComponent(proxyParam)}=${encodeURIComponent(url)}`;
+  const res = await fetch(fetchUrl);
+  if (!res.ok) throw new Error(`discovery: proxy returned ${res.status}`);
+  const html = await res.text();
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  const out = [];
+  const seen = new Set();
+  const push = (href, title) => {
+    if (!href) return;
+    let abs;
+    try { abs = new URL(href, url).href; } catch { return; }
+    if (seen.has(abs)) return;
+    seen.add(abs);
+    out.push({ url: abs, title: title || abs });
+  };
+
+  doc.querySelectorAll('link[rel*="alternate" i]').forEach(link => {
+    const type = (link.getAttribute('type') || '').toLowerCase();
+    if (type.includes('rss') || type.includes('atom') || type.includes('xml')) {
+      push(link.getAttribute('href'), link.getAttribute('title'));
+    }
+  });
+
+  // also try common conventional paths (we don't HEAD-check them; just present as candidates)
+  if (out.length === 0) {
+    for (const path of ['/feed', '/rss', '/feed.xml', '/rss.xml', '/atom.xml', '/index.xml']) {
+      push(new URL(path, url).href, path);
+    }
+  }
+
+  return out;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  FOLD  ▌ projection function (the nine-case switch)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  processEvent(state, event) → newState
+//
+//  This is the *only* function that mutates projected state.
+//  Replaying the entire log through fold from the empty state must reproduce
+//  the current state exactly. (event sourcing, plain.)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function emptyState() {
+  return {
+    feeds: {},          // id → feed
+    items: {},          // id → item (denormalized; full RSS item rows live here)
+    subscriptions: [],  // ordered list of feed ids
+    plays: {},          // itemId → { positionSec, played: bool, lastTs }
+    queue: [],          // ordered itemIds
+    saved: {},          // itemId → { ts }
+    ratings: {},        // itemId → { stars, ts }
+    tags: {},           // tagId → { name, color, items: [itemIds] }
+    nowPlaying: null,   // itemId or null
+    settings: {},
+    lastFetch: {},      // feedId → ts
+  };
+}
+
+function fold(state, ev) {
+  const s = state;  // we mutate in place; caller copies if needed
+  const p = ev.payload || {};
+  switch (ev.op) {
+    case OP.NUL: {
+      return emptyState();
+    }
+    case OP.INS: {
+      // INS feeds  → subscribe
+      if (ev.site === 'feeds' && p.feed) {
+        s.feeds[p.feed.id] = p.feed;
+        if (!s.subscriptions.includes(p.feed.id)) s.subscriptions.push(p.feed.id);
+        if (Array.isArray(p.items)) {
+          for (const it of p.items) s.items[it.id] = it;
+        }
+        s.lastFetch[p.feed.id] = ev.ts;
+      }
+      // INS items → add fetched items (refresh)
+      else if (ev.site === 'items' && Array.isArray(p.items)) {
+        for (const it of p.items) s.items[it.id] = it;
+        if (p.feedId) s.lastFetch[p.feedId] = ev.ts;
+      }
+      return s;
+    }
+    case OP.DES: {
+      // DES feeds → unsubscribe
+      if (ev.site === 'feeds' && p.feedId) {
+        delete s.feeds[p.feedId];
+        s.subscriptions = s.subscriptions.filter(id => id !== p.feedId);
+        // keep items in case still in queue, but mark feedId-orphaned ones
+        for (const id of Object.keys(s.items)) {
+          if (s.items[id].feedId === p.feedId) delete s.items[id];
+        }
+      }
+      // DES episodes/<id> → mark played
+      else if (ev.site.startsWith('episodes/') && p.itemId) {
+        const cur = s.plays[p.itemId] || {};
+        s.plays[p.itemId] = { ...cur, played: true, lastTs: ev.ts };
+      }
+      return s;
+    }
+    case OP.SIG: {
+      // SIG playback → position update
+      if (ev.site === 'playback' && p.itemId) {
+        const cur = s.plays[p.itemId] || {};
+        s.plays[p.itemId] = { ...cur, positionSec: p.positionSec ?? cur.positionSec ?? 0, lastTs: ev.ts };
+        if (p.setNowPlaying) s.nowPlaying = p.itemId;
+      }
+      // SIG episodes/<id> → toggle played explicitly
+      else if (ev.site.startsWith('episodes/') && p.itemId) {
+        const cur = s.plays[p.itemId] || {};
+        s.plays[p.itemId] = { ...cur, played: !!p.played, lastTs: ev.ts };
+      }
+      // SIG nowPlaying → just set/clear current item
+      else if (ev.site === 'nowPlaying') {
+        s.nowPlaying = p.itemId || null;
+      }
+      return s;
+    }
+    case OP.SEG: {
+      // SEG queue → reorder / set queue
+      if (ev.site === 'queue' && Array.isArray(p.queue)) {
+        s.queue = [...p.queue];
+      }
+      return s;
+    }
+    case OP.CON: {
+      // CON queue → push item to queue (or remove if remove flag)
+      if (ev.site === 'queue' && p.itemId) {
+        s.queue = s.queue.filter(id => id !== p.itemId);
+        if (!p.remove) s.queue.push(p.itemId);
+      }
+      return s;
+    }
+    case OP.SYN: {
+      // SYN snapshot → marker; no state mutation
+      return s;
+    }
+    case OP.DEF: {
+      if (ev.site === 'tags' && p.tag) {
+        s.tags[p.tag.id] = p.tag;
+      }
+      return s;
+    }
+    case OP.EVA: {
+      if (ev.site.startsWith('episodes/') && p.itemId) {
+        s.ratings[p.itemId] = { stars: p.stars || 0, ts: ev.ts };
+      }
+      return s;
+    }
+    case OP.REC: {
+      if (ev.site.startsWith('episodes/') && p.itemId) {
+        if (p.remove) delete s.saved[p.itemId];
+        else s.saved[p.itemId] = { ts: ev.ts };
+      }
+      return s;
+    }
+    default:
+      return s;
+  }
+}
+
+function replay(events) {
+  let s = emptyState();
+  for (const ev of events) s = fold(s, ev);
+  return s;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MATRIX  ▌ minimal client (login, room, send, media upload)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  We deliberately don't pull in matrix-js-sdk in this single-file build.
+//  Just direct fetch calls against the C-S API r0/v3.
+//
+//  Auth: bearer token in Authorization header. Stored in IDB kv.
+// ═══════════════════════════════════════════════════════════════════════════
+
+class MatrixClient {
+  constructor() {
+    this.homeserver = CONFIG.MATRIX_HOMESERVER.replace(/\/$/, '');
+    this.token = null;
+    this.userId = null;
+    this.deviceId = null;
+    this.roomId = null;
+  }
+
+  async restore() {
+    const cred = await IDB.getKv('matrix.cred');
+    if (!cred) return false;
+    this.token = cred.token;
+    this.userId = cred.userId;
+    this.deviceId = cred.deviceId;
+    this.roomId = cred.roomId;
+    // verify token still valid
+    try {
+      const r = await this._req('GET', '/_matrix/client/v3/account/whoami');
+      if (r?.user_id) {
+        this.userId = r.user_id;
+        return true;
+      }
+    } catch (e) { /* fall through */ }
+    return false;
+  }
+
+  async login(username, password) {
+    const id = username.includes(':') ? username : username;
+    const body = {
+      type: 'm.login.password',
+      identifier: { type: 'm.id.user', user: id },
+      password,
+      initial_device_display_name: 'brrst',
+    };
+    const r = await fetch(`${this.homeserver}/_matrix/client/v3/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `Login failed (${r.status})`);
+    }
+    const data = await r.json();
+    this.token = data.access_token;
+    this.userId = data.user_id;
+    this.deviceId = data.device_id;
+    await IDB.setKv('matrix.cred', { token: this.token, userId: this.userId, deviceId: this.deviceId, roomId: null });
+    return true;
+  }
+
+  async logout() {
+    try { await this._req('POST', '/_matrix/client/v3/logout'); } catch {}
+    this.token = null; this.userId = null; this.deviceId = null; this.roomId = null;
+    await IDB.setKv('matrix.cred', null);
+  }
+
+  async _req(method, path, body) {
+    const url = `${this.homeserver}${path}`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const opts = { method, headers };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(url, opts);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `${method} ${path} → ${r.status}`);
+    }
+    return r.json();
+  }
+
+  // ensure a per-user private room exists, return its ID
+  async ensureUserRoom() {
+    if (this.roomId) return this.roomId;
+    // try to find an existing room with our topic
+    try {
+      const synced = await this._req('GET', '/_matrix/client/v3/sync?timeout=0');
+      const joinedRooms = synced?.rooms?.join || {};
+      for (const [rid, rdata] of Object.entries(joinedRooms)) {
+        const stateEvents = rdata.state?.events || rdata.timeline?.events || [];
+        for (const ev of stateEvents) {
+          if (ev.type === 'm.room.topic' && ev.content?.topic === CONFIG.MATRIX_ROOM_TOPIC) {
+            this.roomId = rid;
+            await this._persistRoom(rid);
+            return rid;
+          }
+        }
+      }
+    } catch (e) { console.warn('sync probe failed', e); }
+    // create a fresh private room
+    const created = await this._req('POST', '/_matrix/client/v3/createRoom', {
+      preset: 'private_chat',
+      visibility: 'private',
+      name: 'brrst — your data',
+      topic: CONFIG.MATRIX_ROOM_TOPIC,
+      creation_content: { 'org.eo.brrst': true },
+    });
+    this.roomId = created.room_id;
+    await this._persistRoom(this.roomId);
+    return this.roomId;
+  }
+
+  async _persistRoom(rid) {
+    const cred = await IDB.getKv('matrix.cred');
+    if (cred) await IDB.setKv('matrix.cred', { ...cred, roomId: rid });
+  }
+
+  // POST a tracker event into the user's room
+  async sendTracker(payload) {
+    if (!this.roomId) await this.ensureUserRoom();
+    const txnId = _uid();
+    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(this.roomId)}/send/${encodeURIComponent(CONFIG.EVT_TRACKER)}/${txnId}`;
+    return this._req('PUT', path, payload);
+  }
+
+  async sendSnapshotEvent(payload) {
+    if (!this.roomId) await this.ensureUserRoom();
+    const txnId = _uid();
+    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(this.roomId)}/send/${encodeURIComponent(CONFIG.EVT_SNAPSHOT)}/${txnId}`;
+    return this._req('PUT', path, payload);
+  }
+
+  // upload a JSON blob to media store, return mxc URI
+  async uploadJSONSnapshot(obj) {
+    const blob = new Blob([JSON.stringify(obj)], { type: 'application/json' });
+    const r = await fetch(`${this.homeserver}/_matrix/media/v3/upload?filename=brrst-snapshot.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
+      body: blob,
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || `Upload failed (${r.status})`);
+    }
+    const data = await r.json();
+    return data.content_uri; // mxc://...
+  }
+
+  mxcToHttp(mxc) {
+    if (!mxc?.startsWith('mxc://')) return mxc;
+    const rest = mxc.slice(6);
+    return `${this.homeserver}/_matrix/media/v3/download/${rest}`;
+  }
+
+  async fetchSnapshot(mxc) {
+    const url = this.mxcToHttp(mxc);
+    const r = await fetch(url, { headers: { 'Authorization': `Bearer ${this.token}` }});
+    if (!r.ok) throw new Error(`Snapshot fetch failed (${r.status})`);
+    return r.json();
+  }
+
+  // pull recent room events (initial hydration)
+  async fetchRoomMessages(limit = 100) {
+    if (!this.roomId) return { chunk: [] };
+    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(this.roomId)}/messages?dir=b&limit=${limit}`;
+    return this._req('GET', path);
+  }
+}
+
+const Matrix = new MatrixClient();
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STORE  ▌ central event-driven store, exposed via React context
+// ═══════════════════════════════════════════════════════════════════════════
+
+class Store {
+  constructor() {
+    this.state = emptyState();
+    this.listeners = new Set();
+    this.recentEvents = []; // ring buffer for the EO ribbon (last 50)
+    this._lastSnapshotAt = 0;
+    this._eventsSinceSnapshot = 0;
+    this._snapshotTimer = null;
+  }
+
+  subscribe(fn) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  _emit() {
+    for (const fn of this.listeners) fn(this.state);
+  }
+
+  async hydrate() {
+    const log = await IDB.readLog(5000);
+    if (log.length > 0) {
+      _seqCounter = Math.max(...log.map(e => e.seq), 0);
+      this.state = replay(log);
+      this.recentEvents = log.slice(-50);
+    }
+    this._emit();
+  }
+
+  // Apply event: append to log, fold into state, push to outbox, emit, schedule sync
+  async dispatch(op, site, payload, meta = {}) {
+    const ev = makeEvent(op, site, payload, meta);
+    this.state = fold({ ...this.state }, ev);
+    this.recentEvents = [...this.recentEvents.slice(-49), ev];
+    this._eventsSinceSnapshot += 1;
+    this._emit();
+    try { await IDB.appendLog(ev); } catch (e) { console.warn('log append failed', e); }
+    // schedule background ship
+    this._scheduleShip();
+    return ev;
+  }
+
+  _scheduleShip() {
+    if (this._eventsSinceSnapshot >= CONFIG.SNAPSHOT_EVERY_N_EVENTS) {
+      this._eventsSinceSnapshot = 0;
+      queueMicrotask(() => this.shipSnapshot().catch(e => console.warn('snapshot ship failed', e)));
+    }
+    if (!this._snapshotTimer) {
+      this._snapshotTimer = setTimeout(() => {
+        this._snapshotTimer = null;
+        this.shipSnapshot().catch(e => console.warn('snapshot ship failed', e));
+      }, CONFIG.SNAPSHOT_EVERY_MS);
+    }
+    // also ship lightweight trackers immediately for tiny events
+    queueMicrotask(() => this.shipOutboxTrackers().catch(() => {}));
+  }
+
+  // Ship tiny tracker events directly to room (no media store)
+  async shipOutboxTrackers() {
+    if (!Matrix.token) return;
+    const outbox = await IDB.readOutbox();
+    if (outbox.length === 0) return;
+
+    // Tracker events are small (no big payloads) — ship them in batches
+    // We'll ship one tracker event that summarizes the batch
+    const trackable = outbox.filter(ev => ev.op !== OP.INS || !ev.payload?.items);
+    if (trackable.length === 0) return;
+
+    // Group: send up to 20 events in one tracker
+    const batch = trackable.slice(0, 20);
+    try {
+      await Matrix.sendTracker({
+        msgtype: 'org.eo.brrst.tracker',
+        body: `${batch.length} events`,
+        events: batch.map(ev => ({
+          id: ev.id,
+          seq: ev.seq,
+          ts: ev.ts,
+          op: ev.op,
+          site: ev.site,
+          notation: ev.notation,
+          // payload omitted intentionally; full body lives in the snapshot
+        })),
+        from_seq: batch[0].seq,
+        to_seq: batch[batch.length - 1].seq,
+      });
+      await IDB.clearOutbox(batch.map(e => e.seq));
+    } catch (e) {
+      console.warn('tracker ship failed', e);
+    }
+  }
+
+  // Ship a full snapshot of state diffs to media store, post pointer event
+  async shipSnapshot() {
+    if (!Matrix.token) return;
+    const outbox = await IDB.readOutbox();
+    if (outbox.length === 0) return;
+
+    const fromSeq = outbox[0].seq;
+    const toSeq = outbox[outbox.length - 1].seq;
+
+    // The snapshot blob carries the full event payloads (which trackers omit)
+    const snapshot = {
+      version: 1,
+      kind: 'brrst.diff',
+      from_seq: fromSeq,
+      to_seq: toSeq,
+      generated_ts: _now(),
+      events: outbox,
+    };
+
+    try {
+      const mxc = await Matrix.uploadJSONSnapshot(snapshot);
+      await Matrix.sendSnapshotEvent({
+        msgtype: 'org.eo.brrst.snapshot',
+        body: `SYN brrst :: snapshot[${fromSeq}..${toSeq}]`,
+        notation: `${OP.SYN} brrst[${fromSeq}..${toSeq}]`,
+        mxc,
+        from_seq: fromSeq,
+        to_seq: toSeq,
+        event_count: outbox.length,
+      });
+      await IDB.clearOutbox(outbox.map(e => e.seq));
+      this._lastSnapshotAt = _now();
+      // also log a SYN locally
+      const synEv = makeEvent(OP.SYN, 'brrst', { from: fromSeq, to: toSeq, mxc });
+      this.recentEvents = [...this.recentEvents.slice(-49), synEv];
+      this._emit();
+    } catch (e) {
+      console.warn('snapshot upload/send failed', e);
+    }
+  }
+
+  // initial hydration from matrix (if local IDB is empty)
+  async hydrateFromMatrix() {
+    if (!Matrix.token) return;
+    try {
+      await Matrix.ensureUserRoom();
+      const localMax = await IDB.maxSeq();
+      if (localMax > 0) return; // we have local data; skip pull
+      const msgs = await Matrix.fetchRoomMessages(200);
+      const events = (msgs.chunk || []).reverse(); // chronological
+      for (const ev of events) {
+        if (ev.type === CONFIG.EVT_SNAPSHOT && ev.content?.mxc) {
+          try {
+            const blob = await Matrix.fetchSnapshot(ev.content.mxc);
+            if (Array.isArray(blob.events)) {
+              await IDB.bulkAppendLog(blob.events);
+            }
+          } catch (e) { console.warn('failed to hydrate snapshot', e); }
+        }
+      }
+      await this.hydrate();
+    } catch (e) { console.warn('matrix hydrate failed', e); }
+  }
+}
+
+const store = new Store();
+
+// React context
+const StoreCtx = createContext(null);
+function useStore() {
+  const ctx = useContext(StoreCtx);
+  if (!ctx) throw new Error('store missing');
+  return ctx;
+}
+
+// hook: subscribe to store updates
+function useStoreState() {
+  const [, setTick] = useState(0);
+  useEffect(() => store.subscribe(() => setTick(t => t + 1)), []);
+  return store.state;
+}
+
+function useRecentEvents() {
+  const [, setTick] = useState(0);
+  useEffect(() => store.subscribe(() => setTick(t => t + 1)), []);
+  return store.recentEvents;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  HELPERS  ▌
+// ═══════════════════════════════════════════════════════════════════════════
+
+const fmtTime = (sec) => {
+  if (!sec || isNaN(sec)) return '0:00';
+  const s = Math.floor(sec % 60).toString().padStart(2, '0');
+  const m = Math.floor((sec / 60) % 60);
+  const h = Math.floor(sec / 3600);
+  return h > 0 ? `${h}:${m.toString().padStart(2,'0')}:${s}` : `${m}:${s}`;
+};
+
+const fmtDate = (ts) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = (now - d) / (1000 * 60 * 60);
+  if (diff < 1) return 'just now';
+  if (diff < 24) return `${Math.floor(diff)}h ago`;
+  if (diff < 24 * 7) return `${Math.floor(diff / 24)}d ago`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+};
+
+const itemId = (feedId, guid) => `${feedId}::${btoa(unescape(encodeURIComponent(guid))).replace(/=+$/,'')}`;
+const feedId = (url) => 'f_' + btoa(unescape(encodeURIComponent(url))).replace(/[+/=]/g, '').slice(0, 20);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ACTIONS  ▌ all user-facing operations dispatch EO events
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function actionSubscribe(rawUrl) {
+  const url = normalizeFeedUrl(rawUrl);
+  const parsed = await fetchFeed(url);
+  const fid = feedId(url);
+  const feed = {
+    id: fid,
+    ...parsed.feed,
+    addedTs: _now(),
+  };
+  const items = parsed.items.map(it => ({
+    id: itemId(fid, it.guid),
+    feedId: fid,
+    feedTitle: feed.title,
+    feedImage: feed.image,
+    ...it,
+  }));
+  await IDB.putFeed(feed);
+  await IDB.putItems(items);
+  await store.dispatch(OP.INS, 'feeds', { feed, items });
+  return feed;
+}
+
+async function actionUnsubscribe(fid) {
+  await IDB.deleteFeed(fid);
+  await IDB.deleteItemsByFeed(fid);
+  await store.dispatch(OP.DES, 'feeds', { feedId: fid });
+}
+
+async function actionRefresh(fid) {
+  const feed = store.state.feeds[fid];
+  if (!feed) return;
+  const parsed = await fetchFeed(feed.url);
+  const items = parsed.items.map(it => ({
+    id: itemId(fid, it.guid),
+    feedId: fid,
+    feedTitle: feed.title,
+    feedImage: feed.image,
+    ...it,
+  }));
+  await IDB.putItems(items);
+  await store.dispatch(OP.INS, 'items', { feedId: fid, items });
+}
+
+async function actionRefreshAll() {
+  const ids = store.state.subscriptions;
+  for (const fid of ids) {
+    try { await actionRefresh(fid); } catch (e) { console.warn('refresh failed for', fid, e); }
+  }
+}
+
+async function actionSetPlaying(itemId) {
+  await store.dispatch(OP.SIG, 'nowPlaying', { itemId });
+}
+
+async function actionUpdatePosition(itemId, positionSec) {
+  await store.dispatch(OP.SIG, 'playback', { itemId, positionSec, setNowPlaying: true });
+}
+
+async function actionTogglePlayed(itemId) {
+  const cur = store.state.plays[itemId];
+  await store.dispatch(OP.SIG, `episodes/${itemId}`, { itemId, played: !cur?.played });
+}
+
+async function actionSave(itemId, remove = false) {
+  await store.dispatch(OP.REC, `episodes/${itemId}`, { itemId, remove });
+}
+
+async function actionRate(itemId, stars) {
+  await store.dispatch(OP.EVA, `episodes/${itemId}`, { itemId, stars });
+}
+
+async function actionEnqueue(itemId, remove = false) {
+  await store.dispatch(OP.CON, 'queue', { itemId, remove });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ICONS  ▌ inline SVG, no dependencies
+// ═══════════════════════════════════════════════════════════════════════════
+
+const Icon = ({ name, size = 18, className = '', stroke = 1.6 }) => {
+  const props = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: stroke, strokeLinecap: 'round', strokeLinejoin: 'round', className };
+  switch (name) {
+    case 'play':     return <svg {...props}><polygon points="6 4 20 12 6 20 6 4" fill="currentColor" stroke="none" /></svg>;
+    case 'pause':    return <svg {...props}><rect x="6" y="4" width="4" height="16" fill="currentColor" stroke="none" /><rect x="14" y="4" width="4" height="16" fill="currentColor" stroke="none" /></svg>;
+    case 'skip-fwd': return <svg {...props}><polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" /></svg>;
+    case 'skip-bwd': return <svg {...props}><polygon points="19 4 9 12 19 20 19 4" /><line x1="5" y1="5" x2="5" y2="19" /></svg>;
+    case 'fwd-30':   return <svg {...props}><path d="M21 12a9 9 0 1 1-3.55-7.16"/><polyline points="21 4 21 10 15 10"/></svg>;
+    case 'bwd-15':   return <svg {...props}><path d="M3 12a9 9 0 1 0 3.55-7.16"/><polyline points="3 4 3 10 9 10"/></svg>;
+    case 'plus':     return <svg {...props}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
+    case 'x':        return <svg {...props}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+    case 'check':    return <svg {...props}><polyline points="20 6 9 17 4 12" /></svg>;
+    case 'rss':      return <svg {...props}><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1" fill="currentColor"/></svg>;
+    case 'mic':      return <svg {...props}><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>;
+    case 'star':     return <svg {...props}><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 22 12 18 5.5 22 7 14.5 2 9.5 9 9 12 2"/></svg>;
+    case 'star-fill':return <svg {...props}><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 22 12 18 5.5 22 7 14.5 2 9.5 9 9 12 2" fill="currentColor"/></svg>;
+    case 'bookmark': return <svg {...props}><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>;
+    case 'bookmark-fill': return <svg {...props}><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="currentColor"/></svg>;
+    case 'queue':    return <svg {...props}><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="14" y2="18"/><polyline points="17 14 21 18 17 22"/></svg>;
+    case 'menu':     return <svg {...props}><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>;
+    case 'refresh':  return <svg {...props}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>;
+    case 'download': return <svg {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
+    case 'settings': return <svg {...props}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
+    case 'search':   return <svg {...props}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+    case 'chevron-up':   return <svg {...props}><polyline points="18 15 12 9 6 15"/></svg>;
+    case 'chevron-down': return <svg {...props}><polyline points="6 9 12 15 18 9"/></svg>;
+    case 'external':     return <svg {...props}><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>;
+    case 'circle':       return <svg {...props}><circle cx="12" cy="12" r="9"/></svg>;
+    case 'circle-dot':   return <svg {...props}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>;
+    default: return null;
+  }
+};
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PLAYER  ▌ singleton audio element managed at the App root
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PlayerCtx = createContext(null);
+function usePlayer() { return useContext(PlayerCtx); }
+
+function PlayerProvider({ children }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [rate, setRate] = useState(1);
+
+  // ensure audio element exists
+  useEffect(() => {
+    if (!audioRef.current) {
+      const audio = document.createElement('audio');
+      audio.preload = 'metadata';
+      document.body.appendChild(audio);
+      audioRef.current = audio;
+    }
+    return () => { /* keep audio across remounts */ };
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setPosition(audio.currentTime || 0);
+    const onDur  = () => setDuration(audio.duration || 0);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnd = () => setPlaying(false);
+    audio.addEventListener('timeupdate', onTime);
+    audio.addEventListener('loadedmetadata', onDur);
+    audio.addEventListener('durationchange', onDur);
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('ended', onEnd);
+    return () => {
+      audio.removeEventListener('timeupdate', onTime);
+      audio.removeEventListener('loadedmetadata', onDur);
+      audio.removeEventListener('durationchange', onDur);
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('ended', onEnd);
+    };
+  }, []);
+
+  // throttled position dispatch (every 5 sec while playing)
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => {
+      const audio = audioRef.current;
+      const np = store.state.nowPlaying;
+      if (audio && np && audio.currentTime > 0) {
+        actionUpdatePosition(np, audio.currentTime).catch(() => {});
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [playing]);
+
+  // Media Session API (lock-screen controls)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
+    navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
+    navigator.mediaSession.setActionHandler('seekbackward', () => seek(-15));
+    navigator.mediaSession.setActionHandler('seekforward', () => seek(30));
+  }, []);
+
+  const playItem = useCallback(async (item) => {
+    if (!item?.audio) return;
+    const audio = audioRef.current;
+    audio.src = item.audio;
+    const saved = store.state.plays[item.id]?.positionSec || 0;
+    if (saved > 0 && saved < (item.duration || 1e9) - 5) audio.currentTime = saved;
+    audio.playbackRate = rate;
+    await audio.play().catch(e => console.warn('play failed', e));
+    await actionSetPlaying(item.id);
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: item.title,
+        artist: item.feedTitle || item.author,
+        album: 'brrst',
+        artwork: item.image ? [{ src: item.image, sizes: '512x512' }] : [],
+      });
+    }
+  }, [rate]);
+
+  const toggle = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio?.src) return;
+    if (audio.paused) audio.play(); else audio.pause();
+  }, []);
+
+  const seek = useCallback((delta) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, Math.min((audio.duration || 0), (audio.currentTime || 0) + delta));
+  }, []);
+
+  const seekTo = useCallback((t) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = t;
+  }, []);
+
+  const setSpeed = useCallback((r) => {
+    setRate(r);
+    if (audioRef.current) audioRef.current.playbackRate = r;
+  }, []);
+
+  return (
+    <PlayerCtx.Provider value={{ playing, position, duration, rate, playItem, toggle, seek, seekTo, setSpeed }}>
+      {children}
+    </PlayerCtx.Provider>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  UI COMPONENTS  ▌
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────────────────
+//  NAV TABS  ▌ iOS-style long-press to enter edit mode, then drag to reorder
+// ─────────────────────────────────────────────────────────────────────────
+
+const NAV_TABS = [
+  { k: 'news',  label: 'News',     sub: 'feeds' },
+  { k: 'pods',  label: 'Podcasts', sub: 'shows' },
+  { k: 'saved', label: 'Saved',    sub: 'rec' },
+  { k: 'queue', label: 'Queue',    sub: 'next' },
+];
+
+function NavTabs({ tab, setTab }) {
+  const defaultOrder = NAV_TABS.map(t => t.k);
+  const [order, setOrder]         = useState(defaultOrder);
+  const [wiggling, setWiggling]   = useState(false);
+  const [dragKey, setDragKey]     = useState(null);
+  const [dragOffset, setDragOffset] = useState(0);
+
+  const containerRef    = useRef(null);
+  const slotRectsRef    = useRef([]);          // measured at drag start, by slot index
+  const orderRef        = useRef(order);        // stable read inside pointer handlers
+  orderRef.current      = order;
+  const longPressTimer  = useRef(null);
+  const longPressStart  = useRef({ x: 0, y: 0 });
+  const dragStartXRef   = useRef(0);
+  const movedRef        = useRef(false);
+
+  // load saved order
+  useEffect(() => {
+    (async () => {
+      const saved = await IDB.getKv('nav.order');
+      if (Array.isArray(saved) && saved.length === defaultOrder.length) {
+        const valid = saved.filter(k => defaultOrder.includes(k));
+        if (valid.length === defaultOrder.length) setOrder(valid);
+      }
+    })();
+  }, []);
+
+  const persistOrder = (newOrder) => {
+    setOrder(newOrder);
+    IDB.setKv('nav.order', newOrder).catch(() => {});
+  };
+
+  // exit wiggle on outside tap or escape
+  useEffect(() => {
+    if (!wiggling) return;
+    const onOutside = (e) => {
+      if (!containerRef.current?.contains(e.target)) setWiggling(false);
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') setWiggling(false); };
+    document.addEventListener('pointerdown', onOutside);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('pointerdown', onOutside);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [wiggling]);
+
+  const measureSlots = () => {
+    if (!containerRef.current) return [];
+    const rects = [];
+    for (const child of containerRef.current.children) {
+      if (child.dataset?.tabKey) rects.push(child.getBoundingClientRect());
+    }
+    return rects;
+  };
+
+  const startDrag = (e, key) => {
+    slotRectsRef.current = measureSlots();
+    setDragKey(key);
+    dragStartXRef.current = e.clientX;
+    setDragOffset(0);
+    movedRef.current = false;
+    try { e.target.setPointerCapture?.(e.pointerId); } catch {}
+  };
+
+  const onPointerDown = (e, key) => {
+    // preventDefault so iOS doesn't show text-selection/callout
+    if (e.pointerType !== 'mouse') e.preventDefault?.();
+    if (wiggling) {
+      startDrag(e, key);
+      return;
+    }
+    longPressStart.current = { x: e.clientX, y: e.clientY };
+    movedRef.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTimer.current = null;
+      navigator.vibrate?.(30);
+      setWiggling(true);
+      // immediately grab this tab for drag
+      slotRectsRef.current = measureSlots();
+      setDragKey(key);
+      dragStartXRef.current = longPressStart.current.x;
+      setDragOffset(0);
+    }, 420);
+  };
+
+  const onPointerMove = (e) => {
+    // cancel long-press if pointer moves before timer fires
+    if (longPressTimer.current && !wiggling) {
+      const dx = Math.abs(e.clientX - longPressStart.current.x);
+      const dy = Math.abs(e.clientY - longPressStart.current.y);
+      if (dx > 6 || dy > 6) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      return;
+    }
+    if (!dragKey) return;
+
+    const ord = orderRef.current;
+    const draggedSlotIdx = ord.indexOf(dragKey);
+    if (draggedSlotIdx < 0) return;
+
+    const draggedRect = slotRectsRef.current[draggedSlotIdx];
+    if (!draggedRect) return;
+
+    const offset = e.clientX - dragStartXRef.current;
+    movedRef.current = movedRef.current || Math.abs(offset) > 2;
+    setDragOffset(offset);
+
+    const draggedCenter = draggedRect.left + draggedRect.width / 2 + offset;
+
+    // find a slot whose center we've crossed
+    for (let i = 0; i < slotRectsRef.current.length; i++) {
+      if (i === draggedSlotIdx) continue;
+      const slotRect = slotRectsRef.current[i];
+      if (!slotRect) continue;
+      const slotCenter = slotRect.left + slotRect.width / 2;
+      const crossed =
+        (i < draggedSlotIdx && draggedCenter < slotCenter) ||
+        (i > draggedSlotIdx && draggedCenter > slotCenter);
+      if (crossed) {
+        // swap slots draggedSlotIdx ↔ i
+        const newOrder = [...ord];
+        [newOrder[draggedSlotIdx], newOrder[i]] = [newOrder[i], newOrder[draggedSlotIdx]];
+        persistOrder(newOrder);
+        // adjust visual offset so the dragged element stays under the finger
+        // newOffset = (oldSlotLeft - newSlotLeft) + oldOffset
+        const newOffset = (draggedRect.left - slotRectsRef.current[i].left) + offset;
+        dragStartXRef.current = e.clientX - newOffset;
+        setDragOffset(newOffset);
+        navigator.vibrate?.(8);
+        break;
+      }
+    }
+  };
+
+  const onPointerUp = (e, key) => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (dragKey) {
+      // animate snap back to natural position
+      setDragKey(null);
+      setDragOffset(0);
+      // it was a drag, not a tap
+      return;
+    }
+    if (!wiggling && !movedRef.current) {
+      setTab(key);  // normal tap
+    }
+  };
+
+  const onDoubleClick = () => {
+    if (wiggling) setWiggling(false);
+  };
+
+  return (
+    <nav
+      ref={containerRef}
+      className="px-4 sm:px-6 py-2 flex gap-6 text-sm relative"
+      onDoubleClick={onDoubleClick}
+    >
+      {order.map((k, idx) => {
+        const t = NAV_TABS.find(x => x.k === k);
+        if (!t) return null;
+        const isActive   = tab === t.k;
+        const isDragging = dragKey === t.k;
+        const wiggleCls  = wiggling && !isDragging ? (idx % 2 === 0 ? 'wiggle-a' : 'wiggle-b') : '';
+        const dragStyle  = isDragging
+          ? { transform: `translateX(${dragOffset}px) scale(1.06)`, transition: 'none', zIndex: 20 }
+          : { transition: 'transform 0.2s ease-out' };
+        return (
+          <button
+            key={t.k}
+            data-tab-key={t.k}
+            onPointerDown={e => onPointerDown(e, t.k)}
+            onPointerMove={onPointerMove}
+            onPointerUp={e => onPointerUp(e, t.k)}
+            onPointerCancel={e => onPointerUp(e, t.k)}
+            onContextMenu={e => e.preventDefault()}
+            className={`relative py-1 text-left touch-none select-none ${isActive ? 'text-paper' : 'text-mute hover:text-paper/80'} ${wiggleCls} ${isDragging ? 'opacity-90 cursor-grabbing' : 'tap'} ${wiggling ? 'cursor-grab' : ''}`}
+            style={dragStyle}
+          >
+            <span className="text-[15px] font-semibold tracking-tight">{t.label}</span>
+            <span className="eo text-[9px] uppercase tracking-[0.15em] block leading-tight text-mute2">{t.sub}</span>
+            {isActive && !wiggling && <div className="absolute -bottom-2 left-0 right-0 h-[2px] bg-moss rounded-full"></div>}
+          </button>
+        );
+      })}
+      {wiggling && (
+        <button
+          onClick={() => setWiggling(false)}
+          className="ml-auto eo text-[10px] uppercase tracking-[0.2em] text-moss border border-moss/40 rounded-full px-3 hover:bg-moss/10 tap"
+        >
+          done
+        </button>
+      )}
+    </nav>
+  );
+}
+
+function Masthead({ tab, setTab, onMenu }) {
+  return (
+    <header className="border-b border-paper/10 ink relative z-20">
+      <div className="px-4 sm:px-6 pt-3 sm:pt-4 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={onMenu} className="text-paper/70 hover:text-paper tap p-1 -ml-1">
+            <Icon name="menu" size={20} />
+          </button>
+          <div>
+            <div className="text-[26px] sm:text-[30px] font-extrabold tracking-tighter leading-none flex items-baseline gap-1.5">
+              <span className="text-paper lowercase">brrst</span>
+              <span className="sprout text-moss grow-dot"></span>
+            </div>
+            <div className="eo text-[9px] sm:text-[10px] text-mute uppercase tracking-[0.22em] mt-1">an emergent reader</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="eo text-[10px] text-mute tabular-nums">{new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+          <div className="eo text-[9px] text-moss2 uppercase tracking-[0.18em] mt-0.5">↬ growing</div>
+        </div>
+      </div>
+      <div className="myc-rule mx-4 sm:mx-6"></div>
+      <NavTabs tab={tab} setTab={setTab} />
+    </header>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  SEARCH PANEL  ▌ unified local + remote results dropdown
+// ─────────────────────────────────────────────────────────────────────────
+
+function SearchResults({ query, tab, onNavigate, onSubscribe, busySubscribe }) {
+  const state = useStoreState();
+  const cls = classifyInput(query);
+  const [itunes, setItunes]         = useState([]);
+  const [discovered, setDiscovered] = useState([]);
+  const [loading, setLoading]       = useState(false);
+  const [err, setErr]               = useState('');
+
+  // Which discovery source applies for plain-text queries:
+  //   pods tab → iTunes (podcast search)
+  //   news tab → news directory only (no iTunes)
+  //   other tabs (saved/queue) → both
+  const wantsItunes = (tab === 'pods' || tab !== 'news');
+  const wantsNewsDir = (tab === 'news' || tab !== 'pods');
+
+  const newsDirHits = useMemo(() => {
+    if (cls.kind !== 'query' || !wantsNewsDir) return [];
+    return searchNewsDirectory(query);
+  }, [query, cls.kind, wantsNewsDir]);
+
+  const q = query.toLowerCase();
+
+  const localFeeds = useMemo(() => {
+    if (cls.kind === 'url') return [];
+    return Object.values(state.feeds).filter(f =>
+      (f.title || '').toLowerCase().includes(q) ||
+      (f.author || '').toLowerCase().includes(q) ||
+      (f.description || '').toLowerCase().includes(q) ||
+      (f.url || '').toLowerCase().includes(q)
+    ).slice(0, 8);
+  }, [state.feeds, q, cls.kind]);
+
+  const localItems = useMemo(() => {
+    if (cls.kind === 'url') return [];
+    return Object.values(state.items).filter(it =>
+      (it.title || '').toLowerCase().includes(q) ||
+      (it.desc || '').toLowerCase().includes(q) ||
+      (it.feedTitle || '').toLowerCase().includes(q)
+    ).sort((a, b) => (b.pubTs || 0) - (a.pubTs || 0)).slice(0, 12);
+  }, [state.items, q, cls.kind]);
+
+  // remote searches — debounced
+  useEffect(() => {
+    if (cls.kind !== 'query' && cls.kind !== 'domain') {
+      setItunes([]); setDiscovered([]); setErr(''); return;
+    }
+    // Skip iTunes fetch when news context — news directory handles plain queries
+    if (cls.kind === 'query' && !wantsItunes) {
+      setItunes([]); setDiscovered([]); setErr(''); return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setLoading(true); setErr('');
+      try {
+        if (cls.kind === 'query') {
+          const r = await searchItunesPodcasts(query, 8);
+          if (!cancelled) { setItunes(r); setDiscovered([]); }
+        } else if (cls.kind === 'domain') {
+          const r = await discoverFeedsFromSite(cls.value);
+          if (!cancelled) { setDiscovered(r); setItunes([]); }
+        }
+      } catch (e) {
+        if (!cancelled) setErr(e.message || String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 380);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [query, cls.kind, cls.value, wantsItunes]);
+
+  const subscribedUrls = useMemo(
+    () => new Set(Object.values(state.feeds).map(f => f.url)),
+    [state.feeds]
+  );
+
+  const nothing =
+    localFeeds.length === 0 &&
+    localItems.length === 0 &&
+    itunes.length === 0 &&
+    discovered.length === 0 &&
+    newsDirHits.length === 0 &&
+    !loading && !err && cls.kind !== 'url';
+
+  return (
+    <div className="absolute top-full left-0 right-0 mt-2 ink2 border border-paper/12 rounded-2xl shadow-2xl shadow-black/40 max-h-[70vh] overflow-y-auto clean-scroll z-30 fade-in">
+      {cls.kind === 'url' && (
+        <div className="px-4 py-4">
+          <div className="eo text-[10px] uppercase tracking-[0.2em] text-moss mb-1">↬ feed url detected</div>
+          <div className="text-[13px] text-paper/80 break-all">{cls.value}</div>
+          <div className="eo text-[10px] text-mute mt-2">press enter or tap INS to subscribe</div>
+        </div>
+      )}
+
+      {localFeeds.length > 0 && (
+        <ResultSection label="your feeds" count={localFeeds.length}>
+          {localFeeds.map(f => (
+            <ResultRow
+              key={f.id}
+              image={f.image}
+              icon={f.kind === 'podcast' ? 'mic' : 'rss'}
+              title={f.title}
+              subtitle={f.author || shortUrl(f.url)}
+              meta={f.kind === 'podcast' ? 'podcast' : 'feed'}
+              onClick={() => onNavigate({ type: 'feed', id: f.id })}
+            />
+          ))}
+        </ResultSection>
+      )}
+
+      {localItems.length > 0 && (
+        <ResultSection label="episodes & articles" count={localItems.length}>
+          {localItems.map(it => {
+            const feed = state.feeds[it.feedId];
+            const isPod = feed?.kind === 'podcast';
+            return (
+              <ResultRow
+                key={it.id}
+                image={it.image || it.feedImage}
+                icon={isPod ? 'play' : 'rss'}
+                title={it.title}
+                subtitle={it.feedTitle}
+                meta={fmtDate(it.pubTs)}
+                onClick={() => onNavigate({ type: 'item', id: it.id })}
+              />
+            );
+          })}
+        </ResultSection>
+      )}
+
+      {cls.kind === 'query' && wantsNewsDir && newsDirHits.length > 0 && (
+        <ResultSection label="news outlets · directory" count={newsDirHits.length}>
+          {newsDirHits.map(d => {
+            const subscribed = subscribedUrls.has(d.url);
+            return (
+              <ResultRow
+                key={d.url}
+                icon="rss"
+                title={d.title}
+                subtitle={d.category}
+                meta={subscribed ? '✓ subscribed' : 'feed'}
+                metaClass={subscribed ? 'text-moss' : 'text-mute'}
+                onClick={() => !subscribed && onSubscribe(d.url)}
+                disabled={subscribed || busySubscribe}
+                action={subscribed ? null : 'INS'}
+              />
+            );
+          })}
+        </ResultSection>
+      )}
+
+      {cls.kind === 'query' && wantsItunes && (itunes.length > 0 || loading) && (
+        <ResultSection label="discover podcasts · itunes" count={itunes.length}>
+          {loading && itunes.length === 0 && (
+            <div className="px-4 py-3 eo text-[10px] uppercase tracking-[0.18em] text-mute blink-cursor">searching itunes</div>
+          )}
+          {itunes.map(r => {
+            const subscribed = subscribedUrls.has(r.feedUrl);
+            return (
+              <ResultRow
+                key={r.feedUrl}
+                image={r.image}
+                icon="mic"
+                title={r.title}
+                subtitle={r.author}
+                meta={subscribed ? '✓ subscribed' : (r.genre || 'podcast')}
+                metaClass={subscribed ? 'text-moss' : 'text-mute'}
+                onClick={() => !subscribed && onSubscribe(r.feedUrl)}
+                disabled={subscribed || busySubscribe}
+                action={subscribed ? null : 'INS'}
+              />
+            );
+          })}
+        </ResultSection>
+      )}
+
+      {cls.kind === 'domain' && (discovered.length > 0 || loading) && (
+        <ResultSection label={`feeds at ${cls.value}`} count={discovered.length}>
+          {loading && discovered.length === 0 && (
+            <div className="px-4 py-3 eo text-[10px] uppercase tracking-[0.18em] text-mute blink-cursor">scanning page</div>
+          )}
+          {discovered.map(d => {
+            const subscribed = subscribedUrls.has(d.url);
+            return (
+              <ResultRow
+                key={d.url}
+                icon="rss"
+                title={d.title}
+                subtitle={d.url}
+                meta={subscribed ? '✓ subscribed' : 'discovered'}
+                metaClass={subscribed ? 'text-moss' : 'text-mute'}
+                onClick={() => !subscribed && onSubscribe(d.url)}
+                disabled={subscribed || busySubscribe}
+                action={subscribed ? null : 'INS'}
+              />
+            );
+          })}
+        </ResultSection>
+      )}
+
+      {err && (
+        <div className="px-4 py-3 eo text-[10.5px] text-rust">{err}</div>
+      )}
+
+      {nothing && cls.kind !== 'empty' && (
+        <div className="px-4 py-6 text-center">
+          <div className="eo text-[10px] uppercase tracking-[0.2em] text-mute mb-1">↬ no matches</div>
+          <div className="text-[13px] text-paper/60">try a different term, paste a URL, or enter a domain</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultSection({ label, count, children }) {
+  return (
+    <section className="border-b border-paper/6 last:border-b-0">
+      <div className="px-4 pt-3 pb-1.5 flex items-baseline justify-between">
+        <div className="eo text-[10px] uppercase tracking-[0.2em] text-moss2">{label}</div>
+        {count > 0 && <div className="eo text-[10px] text-mute2 tabular-nums">{count}</div>}
+      </div>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function ResultRow({ image, icon, title, subtitle, meta, metaClass = 'text-mute', onClick, disabled, action }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full px-4 py-2 flex items-center gap-3 text-left hover:bg-paper/5 transition-colors ${disabled ? 'opacity-60' : 'tap'}`}
+    >
+      <div className="w-10 h-10 rounded-lg bg-ink3 flex-shrink-0 overflow-hidden flex items-center justify-center text-mute2">
+        {image ? <img src={image} alt="" className="w-full h-full object-cover" loading="lazy" /> : <Icon name={icon || 'rss'} size={16} />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[13.5px] font-medium text-paper clamp-1">{title}</div>
+        {subtitle && <div className="text-[11.5px] text-mute clamp-1">{subtitle}</div>}
+      </div>
+      {meta && <div className={`eo text-[10px] uppercase tracking-[0.12em] ${metaClass} flex-shrink-0`}>{meta}</div>}
+      {action && <div className="eo-op text-[10px] text-moss border border-moss/40 rounded-full px-2 py-0.5 ml-1">{action}</div>}
+    </button>
+  );
+}
+
+function SubscribeBar({ tab, onSubscribe, onNavigate }) {
+  const [text, setText]       = useState('');
+  const [focused, setFocused] = useState(false);
+  const [busy, setBusy]       = useState(false);
+  const [err, setErr]         = useState('');
+
+  const containerRef = useRef(null);
+  const inputRef     = useRef(null);
+
+  // close panel on outside click or escape
+  useEffect(() => {
+    if (!focused) return;
+    const onOut = (e) => {
+      if (!containerRef.current?.contains(e.target)) setFocused(false);
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') { setFocused(false); inputRef.current?.blur(); } };
+    document.addEventListener('pointerdown', onOut);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('pointerdown', onOut);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [focused]);
+
+  const trySubscribe = async (url) => {
+    setBusy(true); setErr('');
+    try {
+      await onSubscribe(url);
+      setText('');
+      setFocused(false);
+    } catch (e) {
+      setErr((e.message || String(e)).slice(0, 200));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    const cls = classifyInput(text);
+    if (cls.kind === 'url') {
+      await trySubscribe(cls.value);
+    } else if (cls.kind === 'domain') {
+      try {
+        const found = await discoverFeedsFromSite(cls.value);
+        if (found.length === 1) await trySubscribe(found[0].url);
+      } catch (e2) {
+        setErr(e2.message || String(e2));
+      }
+    }
+  };
+
+  const handleNavigate = (action) => {
+    onNavigate?.(action);
+    setText('');
+    setFocused(false);
+    inputRef.current?.blur();
+  };
+
+  const cls = classifyInput(text);
+  const showPanel = focused && text.trim().length >= 2;
+  const ctaLabel  = cls.kind === 'url' ? 'INS' : (cls.kind === 'domain' ? '↬' : '↵');
+
+  return (
+    <div ref={containerRef} className="relative mx-4 sm:mx-6 my-3 z-30">
+      <form
+        onSubmit={submit}
+        className="px-4 py-2.5 ink2 border border-paper/10 hover:border-moss/30 focus-within:border-moss/40 transition-colors flex gap-2 items-center rounded-full"
+      >
+        <Icon name="search" size={15} className="text-moss flex-shrink-0" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={text}
+          onChange={e => { setText(e.target.value); setErr(''); }}
+          onFocus={() => setFocused(true)}
+          placeholder="search · paste a URL · or type a site"
+          className="flex-1 bg-transparent border-none outline-none text-sm placeholder:text-mute2 text-paper font-mono min-w-0"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck="false"
+          enterKeyHint={cls.kind === 'url' ? 'go' : 'search'}
+        />
+        {(cls.kind === 'url' || cls.kind === 'domain') && (
+          <button
+            type="submit"
+            disabled={busy}
+            className="eo-op text-[10px] text-moss hover:text-ink hover:bg-moss tap px-2.5 py-1 border border-moss/40 hover:border-moss transition-colors rounded-full disabled:opacity-50 flex-shrink-0"
+          >
+            {busy ? '…' : ctaLabel}
+          </button>
+        )}
+        {err && <div className="eo text-[10px] text-rust ml-1 max-w-[40%] truncate hidden sm:block">{err}</div>}
+      </form>
+      {err && <div className="eo text-[10px] text-rust mt-1 px-3 sm:hidden break-words">{err}</div>}
+      {showPanel && (
+        <SearchResults
+          query={text.trim()}
+          tab={tab}
+          onNavigate={handleNavigate}
+          onSubscribe={async (url) => { await trySubscribe(url); }}
+          busySubscribe={busy}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+//  SORTING  ▌ persistent per-view sort preference + dropdown picker
+// ─────────────────────────────────────────────────────────────────────────
+
+const SORT_FNS = {
+  newest:   (a, b) => (b.pubTs || 0) - (a.pubTs || 0),
+  oldest:   (a, b) => (a.pubTs || 0) - (b.pubTs || 0),
+  source:   (a, b) => (a.feedTitle || '').localeCompare(b.feedTitle || '') || ((b.pubTs || 0) - (a.pubTs || 0)),
+  alpha:    (a, b) => (a.title || '').localeCompare(b.title || ''),
+  duration: (a, b) => (b.duration || 0) - (a.duration || 0),
+};
+
+function applySort(items, sort, plays) {
+  const arr = items.slice();
+  if (sort === 'unplayed') {
+    return arr.sort((a, b) => {
+      const ap = plays?.[a.id]?.played ? 1 : 0;
+      const bp = plays?.[b.id]?.played ? 1 : 0;
+      if (ap !== bp) return ap - bp;
+      return SORT_FNS.newest(a, b);
+    });
+  }
+  return arr.sort(SORT_FNS[sort] || SORT_FNS.newest);
+}
+
+function useSort(viewKey, defaultValue = 'newest') {
+  const [sort, setSort] = useState(defaultValue);
+  useEffect(() => {
+    IDB.getKv(`sort.${viewKey}`).then(v => { if (v) setSort(v); }).catch(() => {});
+  }, [viewKey]);
+  const update = useCallback((v) => {
+    setSort(v);
+    IDB.setKv(`sort.${viewKey}`, v).catch(() => {});
+  }, [viewKey]);
+  return [sort, update];
+}
+
+function SortPicker({ value, onChange, options, theme = 'dark' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [open]);
+
+  const current = options.find(o => o.k === value) || options[0];
+
+  const triggerCls = theme === 'light'
+    ? 'text-ink/55 hover:text-ink border-ink/15 hover:border-moss2/60'
+    : 'text-mute hover:text-paper border-paper/15 hover:border-moss/40';
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`eo text-[10px] uppercase tracking-[0.18em] tap px-2.5 py-1 border rounded-full flex items-center gap-1 ${triggerCls}`}
+      >
+        <span>↕ {current.label}</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 ink2 border border-paper/15 rounded-xl shadow-xl shadow-black/40 z-40 min-w-[180px] py-1 fade-in">
+          {options.map(o => (
+            <button
+              key={o.k}
+              onClick={() => { onChange(o.k); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 eo text-[11px] uppercase tracking-[0.15em] hover:bg-paper/5 ${o.k === value ? 'text-moss' : 'text-paper/80'}`}
+            >
+              {o.k === value ? '· ' : '  '}{o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const NEWS_SORT_OPTS = [
+  { k: 'newest', label: 'newest first' },
+  { k: 'oldest', label: 'oldest first' },
+  { k: 'source', label: 'by source' },
+  { k: 'alpha',  label: 'a → z' },
+];
+const POD_SORT_OPTS = [
+  { k: 'newest',   label: 'newest first' },
+  { k: 'oldest',   label: 'oldest first' },
+  { k: 'unplayed', label: 'unplayed first' },
+  { k: 'source',   label: 'by show' },
+  { k: 'duration', label: 'longest first' },
+];
+const FEED_SORT_OPTS = [
+  { k: 'newest',   label: 'newest first' },
+  { k: 'oldest',   label: 'oldest first' },
+  { k: 'unplayed', label: 'unplayed first' },
+  { k: 'duration', label: 'longest first' },
+];
+
+function NewsView({ openItemId, setOpenItemId }) {
+  const state = useStoreState();
+  const openItem = openItemId ? state.items[openItemId] : null;
+  const [sort, setSort] = useSort('news', 'newest');
+
+  const items = useMemo(() => {
+    const filtered = Object.values(state.items).filter(it => state.feeds[it.feedId]?.kind !== 'podcast');
+    return applySort(filtered, sort).slice(0, 200);
+  }, [state.items, state.feeds, sort]);
+
+  if (openItem) return <ArticleReader item={openItem} onClose={() => setOpenItemId(null)} />;
+
+  if (items.length === 0) return <EmptyNewsState />;
+
+  // editorial layout: lead story big, rest in columns
+  const lead = items[0];
+  const rest = items.slice(1);
+
+  return (
+    <div className="paper-grain text-ink min-h-full fade-in">
+      <div className="px-4 sm:px-6 py-6 sm:py-8 max-w-5xl mx-auto">
+        <div className="flex justify-end mb-4">
+          <SortPicker value={sort} onChange={setSort} options={NEWS_SORT_OPTS} theme="light" />
+        </div>
+        {/* lead story */}
+        <article onClick={() => setOpenItemId(lead.id)} className="cursor-pointer tap mb-8 sm:mb-10 pb-8 border-b border-ink/15">
+          <div className="eo text-[10px] uppercase tracking-[0.2em] text-moss mb-3">{lead.feedTitle} · {fmtDate(lead.pubTs)}</div>
+          <h1 className="text-2xl sm:text-4xl font-bold leading-[1.1] tracking-tight mb-3 sm:mb-4 text-balance">{lead.title}</h1>
+          {lead.image && (
+            <div className="my-4 -mx-2 sm:mx-0">
+              <img src={lead.image} alt="" className="w-full max-h-[50vh] object-cover rounded-2xl" loading="lazy" />
+            </div>
+          )}
+          <p className="text-[15px] sm:text-base leading-relaxed text-ink/75 clamp-3">{lead.desc}</p>
+          <div className="eo text-[10px] text-ink/40 mt-3">{OP_GLYPH.SIG} {lead.author || 'unattributed'}</div>
+        </article>
+
+        {/* rest in two-column on wider screens */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-8">
+          {rest.map(item => (
+            <article key={item.id} onClick={() => setOpenItemId(item.id)} className="cursor-pointer tap pb-5">
+              <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss/80 mb-1.5">{item.feedTitle} · {fmtDate(item.pubTs)}</div>
+              <h2 className="text-base font-semibold leading-snug tracking-tight mb-2 clamp-3">{item.title}</h2>
+              {item.image && (
+                <div className="float-right ml-3 mb-1 -mt-1">
+                  <img src={item.image} alt="" className="w-20 h-20 sm:w-24 sm:h-24 object-cover rounded-xl" loading="lazy" />
+                </div>
+              )}
+              <p className="text-[13px] leading-relaxed text-ink/65 clamp-3">{item.desc}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyNewsState() {
+  return (
+    <div className="paper-grain text-ink min-h-full flex items-center justify-center fade-in">
+      <div className="max-w-lg text-center px-6 py-16">
+        <div className="eo text-[10px] uppercase tracking-[0.3em] text-moss mb-4">↬ no feeds yet</div>
+        <h2 className="text-2xl font-bold tracking-tight mb-3">An empty page</h2>
+        <p className="text-[14px] text-ink/70 leading-relaxed mb-2">
+          Paste a feed URL above to begin. The reader keeps everything local; nothing is ranked,
+          nothing is recommended, nothing is suppressed.
+        </p>
+        <p className="eo text-[10px] uppercase tracking-[0.18em] text-mute2 mt-6">type a url ▸ press <span className="text-moss">INS</span></p>
+      </div>
+    </div>
+  );
+}
+
+function ArticleReader({ item, onClose }) {
+  return (
+    <div className="paper-grain text-ink min-h-full fade-in">
+      <div className="sticky top-0 z-10 paper-grain border-b border-ink/15 px-4 sm:px-6 py-3 flex items-center justify-between">
+        <button onClick={onClose} className="eo text-[11px] uppercase tracking-[0.18em] text-ink/60 hover:text-ink tap">
+          ← back
+        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => actionSave(item.id, !!store.state.saved[item.id])} className="text-ink/60 hover:text-rust tap">
+            <Icon name={store.state.saved[item.id] ? 'bookmark-fill' : 'bookmark'} size={18} />
+          </button>
+          {item.link && (
+            <a href={item.link} target="_blank" rel="noopener" className="text-ink/60 hover:text-moss2 tap">
+              <Icon name="external" size={18} />
+            </a>
+          )}
+        </div>
+      </div>
+
+      <article className="px-4 sm:px-6 py-6 sm:py-10 max-w-2xl mx-auto">
+        <div className="eo text-[10px] uppercase tracking-[0.2em] text-moss mb-4">{item.feedTitle} · {fmtDate(item.pubTs)}</div>
+        <h1 className="text-[26px] sm:text-[34px] font-bold leading-[1.15] tracking-tight mb-2 text-balance">{item.title}</h1>
+        {item.author && <div className="text-[13px] text-ink/60 mb-6">by <span className="italic">{item.author}</span></div>}
+        {item.image && (
+          <img src={item.image} alt="" className="w-full max-h-[60vh] object-cover rounded-2xl mb-6" />
+        )}
+        <div className="prose dropcap" dangerouslySetInnerHTML={{ __html: item.descHtml || item.desc }} />
+      </article>
+    </div>
+  );
+}
+
+
+function PodsView({ openFeedId, setOpenFeedId }) {
+  const state = useStoreState();
+  const player = usePlayer();
+  const openFeed = openFeedId ? state.feeds[openFeedId] : null;
+  const [sort, setSort] = useSort('pods.latest', 'newest');
+
+  const podcastFeeds = useMemo(() => {
+    return Object.values(state.feeds)
+      .filter(f => f.kind === 'podcast')
+      .sort((a, b) => (b.addedTs || 0) - (a.addedTs || 0));
+  }, [state.feeds]);
+
+  // recent episodes across all subs
+  const recentEps = useMemo(() => {
+    const podIds = new Set(podcastFeeds.map(f => f.id));
+    const filtered = Object.values(state.items).filter(it => podIds.has(it.feedId) && it.audio);
+    return applySort(filtered, sort, state.plays).slice(0, 80);
+  }, [state.items, podcastFeeds, sort, state.plays]);
+
+  if (openFeed) return <FeedDetail feed={openFeed} onClose={() => setOpenFeedId(null)} />;
+
+  if (podcastFeeds.length === 0) return <EmptyPodsState />;
+
+  return (
+    <div className="ink min-h-full fade-in">
+      {/* Subscriptions row */}
+      <section className="px-4 sm:px-6 pt-7 pb-2">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-lg font-semibold tracking-tight">Your shows</h2>
+          <span className="eo text-[10px] uppercase tracking-[0.18em] text-mute">{podcastFeeds.length} subscribed</span>
+        </div>
+        <div className="flex gap-3 overflow-x-auto clean-scroll pb-2 -mx-4 px-4 sm:-mx-6 sm:px-6">
+          {podcastFeeds.map(f => (
+            <button key={f.id} onClick={() => setOpenFeedId(f.id)} className="flex-shrink-0 w-32 sm:w-36 text-left tap">
+              <div className="aspect-square cover-shadow bg-ink3 mb-2 overflow-hidden rounded-2xl">
+                {f.image ? (
+                  <img src={f.image} alt={f.title} className="w-full h-full object-cover" loading="lazy" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-mute2">
+                    <Icon name="mic" size={28} />
+                  </div>
+                )}
+              </div>
+              <div className="text-[13px] font-medium leading-snug clamp-2">{f.title}</div>
+              <div className="eo text-[9px] text-mute2 uppercase tracking-[0.12em] mt-1 clamp-1">{f.author || shortUrl(f.url)}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className="myc-rule mx-4 sm:mx-6 my-5"></div>
+
+      {/* Recent episodes */}
+      <section className="px-4 sm:px-6 pb-32">
+        <div className="flex items-baseline justify-between mb-3 gap-3">
+          <h2 className="text-lg font-semibold tracking-tight">Latest</h2>
+          <div className="flex items-center gap-3">
+            <span className="eo text-[10px] uppercase tracking-[0.18em] text-mute hidden sm:inline">{recentEps.length} episodes</span>
+            <SortPicker value={sort} onChange={setSort} options={POD_SORT_OPTS} />
+          </div>
+        </div>
+        <ul className="divide-y divide-paper/6">
+          {recentEps.map(ep => (
+            <EpisodeRow key={ep.id} item={ep} />
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function EpisodeRow({ item, hideShow = false }) {
+  const player = usePlayer();
+  const state = useStoreState();
+  const isCurrent = state.nowPlaying === item.id;
+  const play = state.plays[item.id];
+  const [expanded, setExpanded] = useState(false);
+  const positionPct = play?.positionSec && item.duration ? Math.min(100, (play.positionSec / item.duration) * 100) : 0;
+
+  return (
+    <li className="py-3 sm:py-4">
+      <div className="flex gap-3">
+        {item.image && !hideShow && (
+          <div className="w-14 h-14 sm:w-16 sm:h-16 flex-shrink-0 bg-ink3 rounded-xl overflow-hidden">
+            <img src={item.image} alt="" className="w-full h-full object-cover" loading="lazy" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          {!hideShow && <div className="eo text-[10px] uppercase tracking-[0.15em] text-moss/80 mb-0.5 clamp-1">{item.feedTitle}</div>}
+          <button onClick={() => setExpanded(e => !e)} className="text-left w-full">
+            <div className={`text-[14.5px] font-medium leading-snug ${play?.played ? 'text-mute' : 'text-paper'} clamp-2`}>{item.title}</div>
+          </button>
+          <div className="flex items-center gap-3 mt-2 text-[11px] text-mute eo tabular-nums">
+            <span>{fmtDate(item.pubTs)}</span>
+            {item.duration > 0 && <span>· {fmtTime(item.duration)}</span>}
+            {play?.played && <span className="text-sage">· played</span>}
+            {play?.positionSec > 0 && !play?.played && <span className="text-moss">· {fmtTime(play.positionSec)} in</span>}
+          </div>
+          {expanded && (
+            <p className="text-[13px] text-paper/70 mt-2 leading-relaxed">{item.desc}</p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1.5">
+          <button
+            onClick={() => isCurrent ? player.toggle() : player.playItem(item)}
+            className={`w-10 h-10 rounded-full border-2 ${isCurrent && player.playing ? 'border-moss bg-moss text-ink pulse-moss' : 'border-paper/25 text-paper hover:border-moss hover:text-moss'} flex items-center justify-center tap transition-colors`}
+            disabled={!item.audio}
+          >
+            <Icon name={isCurrent && player.playing ? 'pause' : 'play'} size={14} />
+          </button>
+          <div className="flex gap-1.5">
+            <button onClick={() => actionSave(item.id, !!state.saved[item.id])} className={`tap ${state.saved[item.id] ? 'text-rust' : 'text-mute hover:text-paper'}`}>
+              <Icon name={state.saved[item.id] ? 'bookmark-fill' : 'bookmark'} size={14} />
+            </button>
+            <button onClick={() => actionEnqueue(item.id, state.queue.includes(item.id))} className={`tap ${state.queue.includes(item.id) ? 'text-moss' : 'text-mute hover:text-paper'}`}>
+              <Icon name="queue" size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+      {positionPct > 0 && positionPct < 100 && (
+        <div className="ml-[calc(56px+0.75rem)] sm:ml-[calc(64px+0.75rem)] mt-2 h-[2px] bg-paper/8 relative rounded-full overflow-hidden">
+          <div className="absolute inset-y-0 left-0 bg-moss rounded-full" style={{ width: `${positionPct}%` }} />
+        </div>
+      )}
+    </li>
+  );
+}
+
+function FeedDetail({ feed, onClose }) {
+  const state = useStoreState();
+  const [refreshing, setRefreshing] = useState(false);
+  const [sort, setSort] = useSort('feedDetail', 'newest');
+  const items = useMemo(() => {
+    const filtered = Object.values(state.items).filter(it => it.feedId === feed.id);
+    return applySort(filtered, sort, state.plays);
+  }, [state.items, feed.id, sort, state.plays]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try { await actionRefresh(feed.id); } finally { setRefreshing(false); }
+  };
+
+  return (
+    <div className="ink min-h-full fade-in">
+      <div className="sticky top-0 z-10 ink2 border-b border-paper/10 px-4 sm:px-6 py-3 flex items-center justify-between">
+        <button onClick={onClose} className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-paper tap">
+          ← back
+        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={refresh} disabled={refreshing} className={`text-paper/60 hover:text-paper tap ${refreshing ? 'animate-spin' : ''}`}>
+            <Icon name="refresh" size={18} />
+          </button>
+          <button onClick={() => { if (confirm(`Unsubscribe from "${feed.title}"?`)) { actionUnsubscribe(feed.id); onClose(); } }}
+            className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-moss tap">
+            DES
+          </button>
+        </div>
+      </div>
+
+      {/* Feed header */}
+      <div className="px-4 sm:px-6 py-6 flex gap-4 sm:gap-6 border-b border-paper/10">
+        {feed.image && (
+          <div className="w-28 h-28 sm:w-40 sm:h-40 flex-shrink-0 cover-shadow rounded-2xl overflow-hidden">
+            <img src={feed.image} alt={feed.title} className="w-full h-full object-cover" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-1">{feed.kind === 'podcast' ? 'podcast' : 'feed'}</div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight mb-2">{feed.title}</h1>
+          {feed.author && <div className="text-[13px] italic text-paper/60 mb-2">{feed.author}</div>}
+          <p className="text-sm text-paper/70 clamp-3 leading-relaxed">{feed.description}</p>
+          <div className="eo text-[10px] text-mute mt-3">{items.length} items · {shortUrl(feed.url)}</div>
+        </div>
+      </div>
+
+      <div className="px-4 sm:px-6 pt-4 pb-2 flex justify-end">
+        <SortPicker value={sort} onChange={setSort} options={feed.kind === 'podcast' ? FEED_SORT_OPTS : NEWS_SORT_OPTS} />
+      </div>
+
+      <ul className="divide-y divide-paper/6 px-4 sm:px-6 pb-32">
+        {items.map(it => <EpisodeRow key={it.id} item={it} hideShow />)}
+      </ul>
+    </div>
+  );
+}
+
+function EmptyPodsState() {
+  return (
+    <div className="ink myc-bg min-h-full flex items-center justify-center fade-in">
+      <div className="max-w-md text-center px-6 py-16">
+        <div className="sprout text-moss mx-auto mb-4 grow-dot" style={{ width: '36px', height: '36px' }}></div>
+        <h2 className="text-xl font-bold tracking-tight mb-3">No shows yet</h2>
+        <p className="text-[14px] text-paper/60 leading-relaxed mb-2">
+          Paste a podcast RSS URL above. The player keeps your position locally, syncs to your Matrix room, and never tells anyone what you listened to.
+        </p>
+        <p className="eo text-[10px] uppercase tracking-[0.18em] text-mute2 mt-6">{OP_GLYPH.INS} INS feeds → resolve</p>
+      </div>
+    </div>
+  );
+}
+
+function SavedView() {
+  const state = useStoreState();
+  const items = useMemo(() => {
+    return Object.entries(state.saved)
+      .map(([id, s]) => ({ ...state.items[id], _savedTs: s.ts }))
+      .filter(it => it.id)
+      .sort((a, b) => (b._savedTs || 0) - (a._savedTs || 0));
+  }, [state.saved, state.items]);
+
+  if (items.length === 0) {
+    return (
+      <div className="ink myc-bg min-h-full flex items-center justify-center fade-in">
+        <div className="max-w-md text-center px-6 py-16">
+          <Icon name="bookmark" size={32} className="text-rust mx-auto mb-4" />
+          <h2 className="text-xl font-bold tracking-tight mb-3">Nothing saved</h2>
+          <p className="text-[14px] text-paper/60 leading-relaxed">Tap the bookmark on any item to save it for later.</p>
+          <p className="eo text-[10px] uppercase tracking-[0.18em] text-mute2 mt-6">{OP_GLYPH.REC} REC episodes → resolve</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ink min-h-full fade-in px-4 sm:px-6 py-6 pb-32">
+      <h2 className="text-xl font-bold tracking-tight mb-4">Saved</h2>
+      <ul className="divide-y divide-paper/6">
+        {items.map(it => <EpisodeRow key={it.id} item={it} />)}
+      </ul>
+    </div>
+  );
+}
+
+function QueueView() {
+  const state = useStoreState();
+  const items = state.queue.map(id => state.items[id]).filter(Boolean);
+  if (items.length === 0) {
+    return (
+      <div className="ink myc-bg min-h-full flex items-center justify-center fade-in">
+        <div className="max-w-md text-center px-6 py-16">
+          <Icon name="queue" size={32} className="text-moss mx-auto mb-4" />
+          <h2 className="text-xl font-bold tracking-tight mb-3">Queue is empty</h2>
+          <p className="text-[14px] text-paper/60 leading-relaxed">Add episodes to your queue to play them in order.</p>
+          <p className="eo text-[10px] uppercase tracking-[0.18em] text-mute2 mt-6">{OP_GLYPH.CON} CON queue → resolve</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="ink min-h-full fade-in px-4 sm:px-6 py-6 pb-32">
+      <h2 className="text-xl font-bold tracking-tight mb-4">Up next</h2>
+      <ul className="divide-y divide-paper/6">
+        {items.map(it => <EpisodeRow key={it.id} item={it} />)}
+      </ul>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PLAYER BAR  ▌ sticky bottom now-playing bar
+// ═══════════════════════════════════════════════════════════════════════════
+
+function PlayerBar() {
+  const state = useStoreState();
+  const player = usePlayer();
+  const [expanded, setExpanded] = useState(false);
+
+  const item = state.nowPlaying ? state.items[state.nowPlaying] : null;
+  if (!item) return null;
+
+  const dur = player.duration || item.duration || 0;
+  const pct = dur > 0 ? (player.position / dur) * 100 : 0;
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-30 ink2 border-t border-paper/15 backdrop-blur" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      {/* progress bar (always visible) */}
+      <div className="relative h-[2px] bg-paper/8">
+        <div className="absolute inset-y-0 left-0 bg-moss" style={{ width: `${pct}%`, boxShadow: '0 0 8px rgba(163, 184, 138, 0.4)' }}></div>
+      </div>
+
+      {!expanded ? (
+        <div className="px-3 py-2 flex items-center gap-3" onClick={() => setExpanded(true)}>
+          {item.image && <img src={item.image} alt="" className="w-11 h-11 rounded-xl object-cover flex-shrink-0" />}
+          <div className="flex-1 min-w-0">
+            <div className="text-[13.5px] font-medium leading-tight clamp-1">{item.title}</div>
+            <div className="eo text-[10px] text-mute uppercase tracking-[0.12em] clamp-1">{item.feedTitle}</div>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); player.toggle(); }}
+            className="w-10 h-10 rounded-full bg-moss text-ink flex items-center justify-center tap shadow-lg shadow-moss/20"
+          >
+            <Icon name={player.playing ? 'pause' : 'play'} size={14} />
+          </button>
+        </div>
+      ) : (
+        <div className="px-4 sm:px-6 py-4">
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              {item.image && <img src={item.image} alt="" className="w-16 h-16 rounded-xl object-cover cover-shadow flex-shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <div className="eo text-[10px] uppercase tracking-[0.15em] text-moss mb-0.5 clamp-1">{item.feedTitle}</div>
+                <div className="text-[15px] font-semibold leading-tight tracking-tight clamp-2">{item.title}</div>
+              </div>
+            </div>
+            <button onClick={() => setExpanded(false)} className="text-mute hover:text-paper tap p-1 ml-2">
+              <Icon name="chevron-down" size={18} />
+            </button>
+          </div>
+
+          {/* Seek slider */}
+          <div className="mb-1">
+            <input
+              type="range"
+              className="seek"
+              min="0"
+              max={dur || 0}
+              value={player.position || 0}
+              onChange={(e) => player.seekTo(parseFloat(e.target.value))}
+            />
+          </div>
+          <div className="flex justify-between eo text-[10px] text-mute tabular-nums mb-3">
+            <span>{fmtTime(player.position)}</span>
+            <span>−{fmtTime(Math.max(0, dur - player.position))}</span>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center justify-center gap-6 mb-3">
+            <button onClick={() => player.seek(-15)} className="text-paper hover:text-moss tap relative">
+              <Icon name="bwd-15" size={26} />
+              <span className="absolute inset-0 flex items-center justify-center eo text-[8px] mt-1">15</span>
+            </button>
+            <button onClick={() => player.toggle()} className="w-16 h-16 rounded-full bg-moss text-ink flex items-center justify-center tap shadow-xl shadow-moss/25 hover:scale-105 transition-transform">
+              <Icon name={player.playing ? 'pause' : 'play'} size={22} />
+            </button>
+            <button onClick={() => player.seek(30)} className="text-paper hover:text-moss tap relative">
+              <Icon name="fwd-30" size={26} />
+              <span className="absolute inset-0 flex items-center justify-center eo text-[8px] mt-1">30</span>
+            </button>
+          </div>
+
+          {/* secondary row */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {[1, 1.25, 1.5, 1.75, 2].map(r => (
+                <button key={r} onClick={() => player.setSpeed(r)}
+                  className={`eo text-[10px] px-1.5 py-0.5 ${player.rate === r ? 'text-moss border-b border-moss' : 'text-mute hover:text-paper'} tap`}>
+                  {r}×
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => actionTogglePlayed(item.id)} className={`tap ${state.plays[item.id]?.played ? 'text-sage' : 'text-mute hover:text-paper'}`}>
+                <Icon name="check" size={16} />
+              </button>
+              <button onClick={() => actionSave(item.id, !!state.saved[item.id])} className={`tap ${state.saved[item.id] ? 'text-rust' : 'text-mute hover:text-paper'}`}>
+                <Icon name={state.saved[item.id] ? 'bookmark-fill' : 'bookmark'} size={16} />
+              </button>
+              <button onClick={() => actionEnqueue(item.id, state.queue.includes(item.id))} className={`tap ${state.queue.includes(item.id) ? 'text-moss' : 'text-mute hover:text-paper'}`}>
+                <Icon name="queue" size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  EO RIBBON  ▌ live event log along the bottom
+// ═══════════════════════════════════════════════════════════════════════════
+
+function EOLogRibbon({ visible, onClose }) {
+  const events = useRecentEvents();
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-40 ink3 border-t border-paper/20 max-h-[40vh] flex flex-col" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <div className="flex items-center justify-between px-4 py-2 border-b border-paper/10">
+        <div className="eo text-[10px] uppercase tracking-[0.2em] text-mute">{OP_GLYPH.SYN} given-log · last {events.length}</div>
+        <button onClick={onClose} className="text-mute hover:text-paper tap">
+          <Icon name="x" size={14} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto clean-scroll px-4 py-2 space-y-1 font-mono text-[10.5px]">
+        {events.slice().reverse().map(ev => (
+          <div key={ev.id} className="flex items-center gap-3 hover:bg-paper/5 px-1 py-0.5">
+            <span className="text-mute2 tabular-nums w-12 text-right">{String(ev.seq).padStart(4, '0')}</span>
+            <span className="text-mute2 tabular-nums">{new Date(ev.ts).toLocaleTimeString('en-US', { hour12: false })}</span>
+            <span className="eo-op text-moss">{ev.op}</span>
+            <span className="text-mute2">{OP_GLYPH[ev.op]}</span>
+            <span className="text-paper/80 truncate flex-1">{ev.site}</span>
+            <span className="text-sage hidden sm:inline">{ev.resolution}</span>
+          </div>
+        ))}
+        {events.length === 0 && (
+          <div className="eo text-[10px] text-mute py-4 text-center blink-cursor">awaiting first event</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SETTINGS / DRAWER  ▌
+// ═══════════════════════════════════════════════════════════════════════════
+
+function Drawer({ open, onClose }) {
+  const [authState, setAuthState] = useState(Matrix.token ? 'in' : 'out');
+  const [showLogin, setShowLogin] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="fixed inset-0 bg-black/60" onClick={onClose}></div>
+      <div className="relative ink2 myc-bg w-[85%] max-w-sm h-full flex flex-col border-r border-paper/10 fade-in">
+        <div className="px-4 py-4 border-b border-paper/10 flex items-center justify-between">
+          <div>
+            <div className="text-xl font-extrabold tracking-tighter flex items-baseline gap-1">
+              <span className="lowercase">brrst</span>
+              <span className="sprout text-moss"></span>
+            </div>
+            <div className="eo text-[9px] uppercase tracking-[0.18em] text-mute mt-0.5">settings</div>
+          </div>
+          <button onClick={onClose} className="text-mute hover:text-paper tap">
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto clean-scroll px-4 py-4 space-y-6">
+          {/* Auth */}
+          <section>
+            <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-2">matrix</div>
+            {authState === 'in' ? (
+              <div>
+                <div className="text-sm font-mono text-paper/80 break-all mb-1">{Matrix.userId}</div>
+                <div className="eo text-[10px] text-mute mb-3">{Matrix.roomId ? `room: ${Matrix.roomId.slice(0, 22)}…` : 'no room yet'}</div>
+                <button
+                  onClick={async () => {
+                    await store.shipSnapshot();
+                    alert('snapshot shipped');
+                  }}
+                  className="w-full py-2.5 mb-2 border border-moss/40 text-moss eo text-[11px] uppercase tracking-[0.2em] hover:bg-moss/10 tap rounded-full">
+                  {OP_GLYPH.SYN} ship snapshot now
+                </button>
+                <button
+                  onClick={async () => { await Matrix.logout(); setAuthState('out'); }}
+                  className="w-full py-2.5 border border-paper/20 text-paper/70 eo text-[11px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full">
+                  log out
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm text-paper/70 mb-3">Log in to sync your data to your private Matrix room.</p>
+                {showLogin
+                  ? <LoginForm onDone={() => { setShowLogin(false); setAuthState('in'); }} onCancel={() => setShowLogin(false)} />
+                  : <button onClick={() => setShowLogin(true)} className="w-full py-2.5 border border-moss/40 text-moss eo text-[11px] uppercase tracking-[0.2em] hover:bg-moss/10 tap rounded-full">
+                      log in
+                    </button>
+                }
+              </div>
+            )}
+          </section>
+
+          {/* Proxy */}
+          <ProxySettings />
+
+          {/* Subscriptions: refresh, export, import */}
+          <SubscriptionsPanel />
+
+          {/* EO log toggle */}
+          <section>
+            <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-2">debug</div>
+            <button onClick={() => setShowLog(s => !s)}
+              className="w-full py-2.5 border border-paper/20 text-paper/80 eo text-[11px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full">
+              {showLog ? 'hide' : 'show'} given-log ribbon
+            </button>
+          </section>
+
+          {/* Stats */}
+          <Stats />
+
+          {/* Manifesto */}
+          <section className="pt-4 border-t border-paper/10">
+            <p className="text-[13px] text-paper/65 leading-relaxed">
+              An emergent reader. The feed grows where you tend it. Nothing is ranked, recommended, or remembered against you.
+            </p>
+            <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss2 mt-3">{`↬ brrst — node ${(Matrix.userId || 'local').slice(0,12)}`}</div>
+          </section>
+        </div>
+      </div>
+      <EOLogRibbon visible={showLog} onClose={() => setShowLog(false)} />
+    </div>
+  );
+}
+
+function SubscriptionsPanel() {
+  const state = useStoreState();
+  const fileRef = useRef(null);
+  const [busy, setBusy]       = useState(false);
+  const [progress, setProgress] = useState(null);  // { stage, done, total, current, added, failed }
+  const [result, setResult]   = useState(null);
+  const [err, setErr]         = useState('');
+
+  const handleExport = () => {
+    try {
+      const n = exportOPML();
+      setResult({ kind: 'export', count: n });
+    } catch (e) { setErr(e.message || String(e)); }
+  };
+
+  const handleRefresh = async () => {
+    setBusy(true); setErr(''); setResult(null); setProgress(null);
+    try {
+      await actionRefreshAll();
+      setResult({ kind: 'refresh', count: state.subscriptions.length });
+    } catch (e) { setErr(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const handleImport = async (file) => {
+    setBusy(true); setErr(''); setResult(null); setProgress(null);
+    try {
+      const text = await file.text();
+      const summary = await importOPML(text, (p) => setProgress(p));
+      setResult({ kind: 'import', ...summary });
+      setProgress(null);
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (f) handleImport(f);
+  };
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss">subscriptions</div>
+        <div className="eo text-[10px] text-mute2 tabular-nums">{state.subscriptions.length}</div>
+      </div>
+
+      <div className="space-y-2">
+        <button
+          onClick={handleRefresh}
+          disabled={busy}
+          className="w-full py-2.5 border border-paper/20 text-paper/80 eo text-[11px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full disabled:opacity-50"
+        >
+          ↻ refresh all
+        </button>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleExport}
+            disabled={busy || state.subscriptions.length === 0}
+            className="py-2.5 border border-paper/20 text-paper/80 eo text-[11px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full disabled:opacity-50"
+          >
+            ↓ opml
+          </button>
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            className="py-2.5 border border-moss/40 text-moss eo text-[11px] uppercase tracking-[0.2em] hover:bg-moss/10 tap rounded-full disabled:opacity-50"
+          >
+            ↑ opml
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".opml,.xml,application/xml,text/xml,text/x-opml"
+          className="hidden"
+          onChange={onFile}
+        />
+      </div>
+
+      {progress && (
+        <div className="mt-3 ink3 rounded-xl px-3 py-2 border border-paper/8">
+          <div className="flex justify-between eo text-[10px] uppercase tracking-[0.18em] text-mute mb-1">
+            <span>importing</span>
+            <span className="tabular-nums">{progress.done} / {progress.total}</span>
+          </div>
+          <div className="h-[2px] bg-paper/10 rounded-full overflow-hidden mb-2">
+            <div className="h-full bg-moss" style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }} />
+          </div>
+          {progress.current && <div className="text-[11px] text-paper/70 clamp-1">{progress.current}</div>}
+        </div>
+      )}
+
+      {result && !progress && (
+        <div className="mt-3 eo text-[10.5px] text-moss2 leading-snug">
+          {result.kind === 'export' && `↬ exported ${result.count} feeds as opml`}
+          {result.kind === 'import' && `↬ added ${result.added}, skipped ${result.skipped} dupes${result.failed ? `, ${result.failed} failed` : ''}`}
+          {result.kind === 'refresh' && `↬ refreshed ${result.count} feeds`}
+        </div>
+      )}
+
+      {err && (
+        <div className="mt-3 eo text-[10.5px] text-rust leading-snug break-words">
+          {err}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Stats() {
+  const state = useStoreState();
+  const feedCount = Object.keys(state.feeds).length;
+  const itemCount = Object.keys(state.items).length;
+  const savedCount = Object.keys(state.saved).length;
+  const queueCount = state.queue.length;
+  return (
+    <section>
+      <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-2">store</div>
+      <div className="grid grid-cols-2 gap-2 eo text-[11px]">
+        <Stat label="feeds" value={feedCount} />
+        <Stat label="items" value={itemCount} />
+        <Stat label="saved" value={savedCount} />
+        <Stat label="queue" value={queueCount} />
+      </div>
+    </section>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="ink3 rounded-xl px-3 py-2.5">
+      <div className="text-[9px] uppercase tracking-[0.15em] text-mute">{label}</div>
+      <div className="text-xl font-semibold tabular-nums text-paper tracking-tight">{value}</div>
+    </div>
+  );
+}
+
+function LoginForm({ onDone, onCancel }) {
+  const [user, setUser] = useState('');
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    if (!user || !pass) return;
+    setBusy(true); setErr('');
+    try {
+      await Matrix.login(user, pass);
+      await Matrix.ensureUserRoom();
+      // hydrate from matrix in case there's existing data
+      await store.hydrateFromMatrix();
+      onDone();
+    } catch (ex) {
+      setErr(ex.message || String(ex));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-2">
+      <input type="text" value={user} onChange={e => setUser(e.target.value)} placeholder="username"
+        className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
+      <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="password"
+        className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy}
+          className="flex-1 py-2.5 border border-moss/40 text-moss eo text-[11px] uppercase tracking-[0.2em] hover:bg-moss/10 tap disabled:opacity-50 rounded-full">
+          {busy ? '…' : 'enter'}
+        </button>
+        <button type="button" onClick={onCancel}
+          className="px-3 py-2.5 border border-paper/20 text-paper/70 eo text-[11px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full">
+          cancel
+        </button>
+      </div>
+      {err && <div className="eo text-[10px] text-moss">{err}</div>}
+    </form>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PROXY SETTINGS  ▌ runtime-editable proxy config + live health check
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TEST_FEED_URL = 'https://feeds.npr.org/510289/podcast.xml';  // NPR Up First — small, stable
+
+function ProxySettings() {
+  const [url, setUrl]       = useState(CONFIG.PROXY_URL);
+  const [param, setParam]   = useState(CONFIG.PROXY_PARAM);
+  const [status, setStatus] = useState({ state: 'unknown', msg: '', ts: 0 });
+  const [busy, setBusy]     = useState(false);
+  const [dirty, setDirty]   = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const u = await IDB.getKv('proxy.url');
+      const p = await IDB.getKv('proxy.param');
+      const s = await IDB.getKv('proxy.status');
+      if (u) setUrl(u);
+      if (p) setParam(p);
+      if (s) setStatus(s);
+    })();
+  }, []);
+
+  const save = async () => {
+    await IDB.setKv('proxy.url', url.trim());
+    await IDB.setKv('proxy.param', param.trim() || 'url');
+    const fresh = { state: 'unknown', msg: 'config changed', ts: _now() };
+    await IDB.setKv('proxy.status', fresh);
+    setStatus(fresh);
+    setDirty(false);
+  };
+
+  const test = async () => {
+    if (dirty) await save();
+    setBusy(true);
+    const t0 = _now();
+    try {
+      const u = `${url.trim()}?${encodeURIComponent(param.trim() || 'url')}=${encodeURIComponent(TEST_FEED_URL)}`;
+      const res = await fetch(u);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const ct = res.headers.get('content-type') || '';
+      const xbrrst = res.headers.get('x-brrst-proxy');
+      const cors = res.headers.get('access-control-allow-origin');
+      const xml = await res.text();
+      const doc = new DOMParser().parseFromString(xml, 'application/xml');
+      if (doc.querySelector('parsererror')) throw new Error('returned body is not valid XML');
+      if (!doc.querySelector('channel, feed')) throw new Error('no <channel> or <feed> element');
+      const ms = _now() - t0;
+      const detail = [
+        `${ms}ms`,
+        `${(xml.length / 1024).toFixed(1)}kb`,
+        cors === '*' ? 'cors:*' : `cors:${cors || 'missing'}`,
+        xbrrst ? 'x-brrst-proxy:1' : 'no-proxy-tag',
+      ].join(' · ');
+      const ok = { state: 'ok', msg: detail, ts: _now() };
+      await IDB.setKv('proxy.status', ok);
+      setStatus(ok);
+    } catch (e) {
+      const err = { state: 'fail', msg: (e.message || String(e)).slice(0, 140), ts: _now() };
+      await IDB.setKv('proxy.status', err);
+      setStatus(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = () => {
+    setUrl(CONFIG.PROXY_URL);
+    setParam(CONFIG.PROXY_PARAM);
+    setDirty(true);
+  };
+
+  const dotColor = status.state === 'ok' ? 'bg-moss' : status.state === 'fail' ? 'bg-rust' : 'bg-mute2';
+  const dotPulse = status.state === 'ok' ? 'pulse-moss' : '';
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss">proxy</div>
+        <div className="flex items-center gap-1.5">
+          <span className={`inline-block w-2 h-2 rounded-full ${dotColor} ${dotPulse}`}></span>
+          <span className="eo text-[10px] uppercase tracking-[0.15em] text-mute">
+            {status.state === 'ok' ? 'reachable' : status.state === 'fail' ? 'failed' : 'untested'}
+          </span>
+        </div>
+      </div>
+
+      <div className="ink3 rounded-xl p-3 space-y-2 border border-paper/8">
+        <label className="block">
+          <span className="eo text-[9px] uppercase tracking-[0.18em] text-mute2">endpoint</span>
+          <input
+            type="url"
+            value={url}
+            onChange={e => { setUrl(e.target.value); setDirty(true); }}
+            placeholder="https://your-proxy/feed"
+            className="w-full mt-1 bg-ink2 px-2.5 py-1.5 text-[12px] font-mono text-paper border border-paper/10 outline-none focus:border-moss/50 rounded-lg"
+            spellCheck="false"
+            autoComplete="off"
+          />
+        </label>
+        <label className="block">
+          <span className="eo text-[9px] uppercase tracking-[0.18em] text-mute2">query param</span>
+          <input
+            type="text"
+            value={param}
+            onChange={e => { setParam(e.target.value); setDirty(true); }}
+            placeholder="url"
+            className="w-full mt-1 bg-ink2 px-2.5 py-1.5 text-[12px] font-mono text-paper border border-paper/10 outline-none focus:border-moss/50 rounded-lg"
+            spellCheck="false"
+            autoComplete="off"
+          />
+        </label>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={test}
+            disabled={busy}
+            className="flex-1 py-1.5 border border-moss/40 text-moss eo text-[10px] uppercase tracking-[0.2em] hover:bg-moss/10 tap rounded-full disabled:opacity-50"
+          >
+            {busy ? 'pinging…' : '↬ test'}
+          </button>
+          {dirty && (
+            <button
+              type="button"
+              onClick={save}
+              className="flex-1 py-1.5 border border-paper/25 text-paper/80 eo text-[10px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full"
+            >
+              save
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={reset}
+            title="reset to default"
+            className="px-3 py-1.5 border border-paper/15 text-paper/50 eo text-[10px] uppercase tracking-[0.2em] hover:bg-paper/5 tap rounded-full"
+          >
+            ↺
+          </button>
+        </div>
+
+        {status.msg && (
+          <div className={`eo text-[10px] leading-snug pt-1.5 ${status.state === 'fail' ? 'text-rust' : status.state === 'ok' ? 'text-moss2' : 'text-mute'}`}>
+            {status.msg}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  APP ROOT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function App() {
+  const [tab, setTab] = useState('news');
+  const [drawer, setDrawer] = useState(false);
+  const [booted, setBooted] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      await IDB.open();
+      await store.hydrate();
+      const ok = await Matrix.restore();
+      if (ok) {
+        try {
+          await Matrix.ensureUserRoom();
+          if ((await IDB.maxSeq()) === 0) await store.hydrateFromMatrix();
+        } catch (e) { console.warn(e); }
+      }
+      // open the genesis NUL event if log is empty
+      if ((await IDB.maxSeq()) === 0) {
+        await store.dispatch(OP.NUL, 'brrst', { greeting: 'genesis' });
+      }
+      setBooted(true);
+    })();
+  }, []);
+
+  if (!booted) {
+    return (
+      <div className="ink min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl font-extrabold tracking-tighter mb-3 flex items-baseline justify-center gap-1.5">
+            <span className="lowercase">brrst</span>
+            <span className="sprout text-moss grow-dot"></span>
+          </div>
+          <div className="eo text-[10px] uppercase tracking-[0.2em] text-mute blink-cursor">replaying given-log</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <StoreCtx.Provider value={store}>
+      <PlayerProvider>
+        <AppInner
+          tab={tab} setTab={setTab}
+          drawer={drawer} setDrawer={setDrawer}
+        />
+      </PlayerProvider>
+    </StoreCtx.Provider>
+  );
+}
+
+function AppInner({ tab, setTab, drawer, setDrawer }) {
+  const player = usePlayer();
+  const state  = useStoreState();
+  const [openFeedId, setOpenFeedId] = useState(null);
+  const [openItemId, setOpenItemId] = useState(null);
+
+  const handleSubscribe = async (url) => {
+    const feed = await actionSubscribe(url);
+    // jump to the new feed
+    if (feed?.id) {
+      setTab(feed.kind === 'podcast' ? 'pods' : 'news');
+      if (feed.kind === 'podcast') setOpenFeedId(feed.id);
+    }
+    return feed;
+  };
+
+  const navigate = (action) => {
+    if (!action) return;
+    if (action.type === 'feed') {
+      const f = state.feeds[action.id];
+      if (!f) return;
+      const goTab = f.kind === 'podcast' ? 'pods' : 'news';
+      setTab(goTab);
+      if (f.kind === 'podcast') {
+        setOpenFeedId(action.id);
+      } else {
+        // news feed — no per-feed view; we still set the filter context
+        setOpenFeedId(null);
+      }
+      setOpenItemId(null);
+    } else if (action.type === 'item') {
+      const it = state.items[action.id];
+      if (!it) return;
+      const f = state.feeds[it.feedId];
+      if (f?.kind === 'podcast') {
+        // play it directly
+        player.playItem(it).catch(() => {});
+        setTab('pods');
+      } else {
+        setTab('news');
+        setOpenItemId(action.id);
+      }
+    } else if (action.type === 'play') {
+      const it = state.items[action.id];
+      if (it?.audio) player.playItem(it).catch(() => {});
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Masthead tab={tab} setTab={setTab} onMenu={() => setDrawer(true)} />
+      <SubscribeBar tab={tab} onSubscribe={handleSubscribe} onNavigate={navigate} />
+      <main className="flex-1 pb-32">
+        {tab === 'news'  && <NewsView openItemId={openItemId} setOpenItemId={setOpenItemId} />}
+        {tab === 'pods'  && <PodsView openFeedId={openFeedId} setOpenFeedId={setOpenFeedId} />}
+        {tab === 'saved' && <SavedView />}
+        {tab === 'queue' && <QueueView />}
+      </main>
+      <PlayerBar />
+      <Drawer open={drawer} onClose={() => setDrawer(false)} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MOUNT
+// ═══════════════════════════════════════════════════════════════════════════
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+
+// expose for console debugging
+window.brrst = { store, IDB, Matrix, OP, OP_GLYPH, makeEvent, fold, replay, fetchFeed, parseFeed };
+
+</script>
+</body>
+</html>
