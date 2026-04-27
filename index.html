@@ -3626,26 +3626,48 @@ function ProxySettings() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const TAB_STORAGE_KEY = 'brrst:lastTab';
+const TAB_KV_KEY = 'ui.lastTab';
 const VALID_TABS = new Set(['news', 'pods', 'saved', 'queue']);
 
 function App() {
-  const [tab, setTab] = useState(() => {
+  // Sync fast-path via localStorage; some PWA storage backends (notably iOS
+  // standalone) can evict localStorage, so we also persist via IDB below
+  // and fall back to it when localStorage is empty.
+  const initialTabFromLS = (() => {
     try {
       const saved = localStorage.getItem(TAB_STORAGE_KEY);
       if (saved && VALID_TABS.has(saved)) return saved;
     } catch (_) {}
-    return 'news';
-  });
+    return null;
+  })();
+  const [tab, setTab] = useState(initialTabFromLS || 'news');
   const [drawer, setDrawer] = useState(false);
   const [booted, setBooted] = useState(false);
+  const tabHydrated = useRef(false);
+  const hadLSTab = useRef(initialTabFromLS !== null);
 
+  // Persist tab changes to both stores; skip until IDB hydration has happened
+  // so we don't clobber the saved IDB value with the default before reading.
   useEffect(() => {
     try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch (_) {}
+    if (tabHydrated.current) {
+      IDB.setKv(TAB_KV_KEY, tab).catch(() => {});
+    }
   }, [tab]);
 
   useEffect(() => {
     (async () => {
       await IDB.open();
+      // Restore last tab before we render AppInner; the boot screen masks
+      // this. localStorage takes precedence when it had a value, since it's
+      // the most recently-written sync store. Otherwise fall back to IDB.
+      try {
+        if (!hadLSTab.current) {
+          const savedTab = await IDB.getKv(TAB_KV_KEY);
+          if (savedTab && VALID_TABS.has(savedTab)) setTab(savedTab);
+        }
+      } catch (_) {}
+      tabHydrated.current = true;
       await store.hydrate();
       const ok = await Matrix.restore();
       if (ok) {
