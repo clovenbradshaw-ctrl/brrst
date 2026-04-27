@@ -1485,6 +1485,7 @@ class MatrixClient {
 
   // upload a JSON blob to media store, return mxc URI
   async uploadJSONSnapshot(obj) {
+    if (!this.token) throw new Error('Not logged in to Matrix');
     const blob = new Blob([JSON.stringify(obj)], { type: 'application/json' });
     const r = await fetch(`${this.homeserver}/_matrix/media/v3/upload?filename=brrst-snapshot.json`, {
       method: 'POST',
@@ -1506,6 +1507,7 @@ class MatrixClient {
   }
 
   async fetchSnapshot(mxc) {
+    if (!this.token) throw new Error('Not logged in to Matrix');
     const url = this.mxcToHttp(mxc);
     const r = await fetch(url, { headers: { 'Authorization': `Bearer ${this.token}` }});
     if (!r.ok) throw new Error(`Snapshot fetch failed (${r.status})`);
