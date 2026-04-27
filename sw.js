@@ -1,5 +1,5 @@
 // brrst service worker — offline-first app shell
-const VERSION = 'brrst-v1';
+const VERSION = 'brrst-v2';
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
@@ -50,6 +50,12 @@ function isNavigationRequest(request) {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
+
+  // Never intercept media — Range requests need direct network access for
+  // streaming and seeking. An active SW can otherwise wedge audio playback
+  // even when we don't call respondWith().
+  if (request.destination === 'audio' || request.destination === 'video') return;
+  if (request.headers.has('range')) return;
 
   const url = new URL(request.url);
 
