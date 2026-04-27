@@ -3,11 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0a">
+<meta name="theme-color" content="#0e110d">
+<meta name="color-scheme" content="dark light">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="brrst">
+<meta name="application-name" content="brrst">
 <title>brrst — reader / listener</title>
 <meta name="description" content="A reader and podcast listener. Yours, not theirs. Local-first, Matrix-synced, EO-notarized.">
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="mask-icon" href="icon.svg" color="#0e110d">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3740,6 +3749,17 @@ root.render(<App />);
 // expose for console debugging
 window.brrst = { store, IDB, Matrix, OP, OP_GLYPH, makeEvent, fold, replay, fetchFeed, parseFeed };
 
+</script>
+
+<script>
+  // PWA: register service worker (only on http(s), not file://)
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch((err) => {
+        console.warn('[brrst] service worker registration failed:', err);
+      });
+    });
+  }
 </script>
 </body>
 </html>

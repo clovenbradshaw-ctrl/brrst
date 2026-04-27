@@ -1,0 +1,30 @@
+{
+  "name": "brrst — reader / listener",
+  "short_name": "brrst",
+  "description": "A reader and podcast listener. Yours, not theirs. Local-first, Matrix-synced, EO-notarized.",
+  "start_url": "./",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#0e110d",
+  "theme_color": "#0e110d",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["news", "music", "productivity"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
