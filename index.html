@@ -3625,10 +3625,23 @@ function ProxySettings() {
 //  APP ROOT
 // ═══════════════════════════════════════════════════════════════════════════
 
+const TAB_STORAGE_KEY = 'brrst:lastTab';
+const VALID_TABS = new Set(['news', 'pods', 'saved', 'queue']);
+
 function App() {
-  const [tab, setTab] = useState('news');
+  const [tab, setTab] = useState(() => {
+    try {
+      const saved = localStorage.getItem(TAB_STORAGE_KEY);
+      if (saved && VALID_TABS.has(saved)) return saved;
+    } catch (_) {}
+    return 'news';
+  });
   const [drawer, setDrawer] = useState(false);
   const [booted, setBooted] = useState(false);
+
+  useEffect(() => {
+    try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch (_) {}
+  }, [tab]);
 
   useEffect(() => {
     (async () => {
