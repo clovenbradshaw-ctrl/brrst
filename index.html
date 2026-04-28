@@ -1604,6 +1604,12 @@ class Store {
     this._lastSnapshotAt = 0;
     this._eventsSinceSnapshot = 0;
     this._snapshotTimer = null;
+    // serialize dispatches so fold-order matches call-order even when
+    // multiple actions race (e.g. rapid position updates while the user
+    // also clicks save/queue). Without this, awaiting appendLog inside
+    // dispatch could let a later event apply its fold before an earlier
+    // one, producing state that disagrees with the log on replay.
+    this._dispatchChain = Promise.resolve();
   }
 
   subscribe(fn) {
@@ -1625,15 +1631,38 @@ class Store {
     this._emit();
   }
 
-  // Apply event: append to log, fold into state, push to outbox, emit, schedule sync
+  // Apply event: persist to the Given-Log first, then fold + emit. We never
+  // let the UI claim a state change that didn't survive the trip to disk —
+  // otherwise a reload would erase it (state is rebuilt from the log) and a
+  // new subscription, save, or rating would silently disappear.
+  //
+  // Dispatches are serialized via _dispatchChain so fold runs in call-order
+  // even when callers don't await (e.g. fire-and-forget onClick handlers).
   async dispatch(op, site, payload, meta = {}) {
+    const next = this._dispatchChain
+      // swallow upstream rejection on the chain so one failed dispatch
+      // doesn't poison every subsequent one — the rejection still
+      // propagates to the original caller via the original promise.
+      .catch(() => {})
+      .then(() => this._dispatchOne(op, site, payload, meta));
+    this._dispatchChain = next;
+    return next;
+  }
+
+  async _dispatchOne(op, site, payload, meta) {
     const ev = makeEvent(op, site, payload, meta);
+    try {
+      await IDB.appendLog(ev);
+    } catch (e) {
+      // The seq slot is now a gap in the log. Replay sorts by seq so a gap
+      // is harmless; we don't try to reclaim the counter (a later event
+      // may already hold a higher seq).
+      throw new Error(`log append failed: ${e?.message || e}`);
+    }
     this.state = fold({ ...this.state }, ev);
     this.recentEvents = [...this.recentEvents.slice(-49), ev];
     this._eventsSinceSnapshot += 1;
     this._emit();
-    try { await IDB.appendLog(ev); } catch (e) { console.warn('log append failed', e); }
-    // schedule background ship
     this._scheduleShip();
     return ev;
   }
@@ -1817,21 +1846,17 @@ async function actionSubscribe(rawUrl) {
     addedTs: _now(),
   };
   const items = parsed.items.map(it => ({
+    ...it,
     id: itemId(fid, it.guid),
     feedId: fid,
     feedTitle: feed.title,
     feedImage: feed.image,
-    ...it,
   }));
-  await IDB.putFeed(feed);
-  await IDB.putItems(items);
   await store.dispatch(OP.INS, 'feeds', { feed, items });
   return feed;
 }
 
 async function actionUnsubscribe(fid) {
-  await IDB.deleteFeed(fid);
-  await IDB.deleteItemsByFeed(fid);
   await store.dispatch(OP.DES, 'feeds', { feedId: fid });
 }
 
@@ -1844,7 +1869,6 @@ async function actionSetFeedKind(fid, kind) {
   const cur = store.state.feeds[fid];
   if (!cur || cur.kind === kind) return;
   const next = { ...cur, kind };
-  await IDB.putFeed(next);
   await store.dispatch(OP.INS, 'feeds', { feed: next });
 }
 
@@ -1853,13 +1877,12 @@ async function actionRefresh(fid) {
   if (!feed) return;
   const parsed = await fetchFeed(feed.url);
   const items = parsed.items.map(it => ({
+    ...it,
     id: itemId(fid, it.guid),
     feedId: fid,
     feedTitle: feed.title,
     feedImage: feed.image,
-    ...it,
   }));
-  await IDB.putItems(items);
   await store.dispatch(OP.INS, 'items', { feedId: fid, items });
 }
 
