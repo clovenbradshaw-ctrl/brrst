@@ -1255,8 +1255,12 @@ function emptyState() {
   };
 }
 
+// Immutable update: each sub-collection that changes gets a new reference so
+// React `useMemo([state.feeds])` and friends actually re-run. The top-level
+// state object is shallow-copied by the caller (`dispatch`), so mutating `s`
+// here is fine — but anything we read in components must get a fresh ref.
 function fold(state, ev) {
-  const s = state;  // we mutate in place; caller copies if needed
+  const s = state;
   const p = ev.payload || {};
   switch (ev.op) {
     case OP.NUL: {
@@ -1265,34 +1269,45 @@ function fold(state, ev) {
     case OP.INS: {
       // INS feeds  → subscribe
       if (ev.site === 'feeds' && p.feed) {
-        s.feeds[p.feed.id] = p.feed;
-        if (!s.subscriptions.includes(p.feed.id)) s.subscriptions.push(p.feed.id);
-        if (Array.isArray(p.items)) {
-          for (const it of p.items) s.items[it.id] = it;
+        s.feeds = { ...s.feeds, [p.feed.id]: p.feed };
+        if (!s.subscriptions.includes(p.feed.id)) {
+          s.subscriptions = [...s.subscriptions, p.feed.id];
         }
-        s.lastFetch[p.feed.id] = ev.ts;
+        if (Array.isArray(p.items) && p.items.length) {
+          const nextItems = { ...s.items };
+          for (const it of p.items) nextItems[it.id] = it;
+          s.items = nextItems;
+        }
+        s.lastFetch = { ...s.lastFetch, [p.feed.id]: ev.ts };
       }
       // INS items → add fetched items (refresh)
       else if (ev.site === 'items' && Array.isArray(p.items)) {
-        for (const it of p.items) s.items[it.id] = it;
-        if (p.feedId) s.lastFetch[p.feedId] = ev.ts;
+        if (p.items.length) {
+          const nextItems = { ...s.items };
+          for (const it of p.items) nextItems[it.id] = it;
+          s.items = nextItems;
+        }
+        if (p.feedId) s.lastFetch = { ...s.lastFetch, [p.feedId]: ev.ts };
       }
       return s;
     }
     case OP.DES: {
       // DES feeds → unsubscribe
       if (ev.site === 'feeds' && p.feedId) {
-        delete s.feeds[p.feedId];
+        const { [p.feedId]: _gone, ...restFeeds } = s.feeds;
+        s.feeds = restFeeds;
         s.subscriptions = s.subscriptions.filter(id => id !== p.feedId);
-        // keep items in case still in queue, but mark feedId-orphaned ones
+        // drop items belonging to the removed feed
+        const nextItems = {};
         for (const id of Object.keys(s.items)) {
-          if (s.items[id].feedId === p.feedId) delete s.items[id];
+          if (s.items[id].feedId !== p.feedId) nextItems[id] = s.items[id];
         }
+        s.items = nextItems;
       }
       // DES episodes/<id> → mark played
       else if (ev.site.startsWith('episodes/') && p.itemId) {
         const cur = s.plays[p.itemId] || {};
-        s.plays[p.itemId] = { ...cur, played: true, lastTs: ev.ts };
+        s.plays = { ...s.plays, [p.itemId]: { ...cur, played: true, lastTs: ev.ts } };
       }
       return s;
     }
@@ -1300,13 +1315,13 @@ function fold(state, ev) {
       // SIG playback → position update
       if (ev.site === 'playback' && p.itemId) {
         const cur = s.plays[p.itemId] || {};
-        s.plays[p.itemId] = { ...cur, positionSec: p.positionSec ?? cur.positionSec ?? 0, lastTs: ev.ts };
+        s.plays = { ...s.plays, [p.itemId]: { ...cur, positionSec: p.positionSec ?? cur.positionSec ?? 0, lastTs: ev.ts } };
         if (p.setNowPlaying) s.nowPlaying = p.itemId;
       }
       // SIG episodes/<id> → toggle played explicitly
       else if (ev.site.startsWith('episodes/') && p.itemId) {
         const cur = s.plays[p.itemId] || {};
-        s.plays[p.itemId] = { ...cur, played: !!p.played, lastTs: ev.ts };
+        s.plays = { ...s.plays, [p.itemId]: { ...cur, played: !!p.played, lastTs: ev.ts } };
       }
       // SIG nowPlaying → just set/clear current item
       else if (ev.site === 'nowPlaying') {
@@ -1324,8 +1339,8 @@ function fold(state, ev) {
     case OP.CON: {
       // CON queue → push item to queue (or remove if remove flag)
       if (ev.site === 'queue' && p.itemId) {
-        s.queue = s.queue.filter(id => id !== p.itemId);
-        if (!p.remove) s.queue.push(p.itemId);
+        const filtered = s.queue.filter(id => id !== p.itemId);
+        s.queue = p.remove ? filtered : [...filtered, p.itemId];
       }
       return s;
     }
@@ -1335,20 +1350,24 @@ function fold(state, ev) {
     }
     case OP.DEF: {
       if (ev.site === 'tags' && p.tag) {
-        s.tags[p.tag.id] = p.tag;
+        s.tags = { ...s.tags, [p.tag.id]: p.tag };
       }
       return s;
     }
     case OP.EVA: {
       if (ev.site.startsWith('episodes/') && p.itemId) {
-        s.ratings[p.itemId] = { stars: p.stars || 0, ts: ev.ts };
+        s.ratings = { ...s.ratings, [p.itemId]: { stars: p.stars || 0, ts: ev.ts } };
       }
       return s;
     }
     case OP.REC: {
       if (ev.site.startsWith('episodes/') && p.itemId) {
-        if (p.remove) delete s.saved[p.itemId];
-        else s.saved[p.itemId] = { ts: ev.ts };
+        if (p.remove) {
+          const { [p.itemId]: _gone, ...restSaved } = s.saved;
+          s.saved = restSaved;
+        } else {
+          s.saved = { ...s.saved, [p.itemId]: { ts: ev.ts } };
+        }
       }
       return s;
     }
@@ -1585,6 +1604,12 @@ class Store {
     this._lastSnapshotAt = 0;
     this._eventsSinceSnapshot = 0;
     this._snapshotTimer = null;
+    // serialize dispatches so fold-order matches call-order even when
+    // multiple actions race (e.g. rapid position updates while the user
+    // also clicks save/queue). Without this, awaiting appendLog inside
+    // dispatch could let a later event apply its fold before an earlier
+    // one, producing state that disagrees with the log on replay.
+    this._dispatchChain = Promise.resolve();
   }
 
   subscribe(fn) {
@@ -1606,15 +1631,38 @@ class Store {
     this._emit();
   }
 
-  // Apply event: append to log, fold into state, push to outbox, emit, schedule sync
+  // Apply event: persist to the Given-Log first, then fold + emit. We never
+  // let the UI claim a state change that didn't survive the trip to disk —
+  // otherwise a reload would erase it (state is rebuilt from the log) and a
+  // new subscription, save, or rating would silently disappear.
+  //
+  // Dispatches are serialized via _dispatchChain so fold runs in call-order
+  // even when callers don't await (e.g. fire-and-forget onClick handlers).
   async dispatch(op, site, payload, meta = {}) {
+    const next = this._dispatchChain
+      // swallow upstream rejection on the chain so one failed dispatch
+      // doesn't poison every subsequent one — the rejection still
+      // propagates to the original caller via the original promise.
+      .catch(() => {})
+      .then(() => this._dispatchOne(op, site, payload, meta));
+    this._dispatchChain = next;
+    return next;
+  }
+
+  async _dispatchOne(op, site, payload, meta) {
     const ev = makeEvent(op, site, payload, meta);
+    try {
+      await IDB.appendLog(ev);
+    } catch (e) {
+      // The seq slot is now a gap in the log. Replay sorts by seq so a gap
+      // is harmless; we don't try to reclaim the counter (a later event
+      // may already hold a higher seq).
+      throw new Error(`log append failed: ${e?.message || e}`);
+    }
     this.state = fold({ ...this.state }, ev);
     this.recentEvents = [...this.recentEvents.slice(-49), ev];
     this._eventsSinceSnapshot += 1;
     this._emit();
-    try { await IDB.appendLog(ev); } catch (e) { console.warn('log append failed', e); }
-    // schedule background ship
     this._scheduleShip();
     return ev;
   }
@@ -1798,21 +1846,17 @@ async function actionSubscribe(rawUrl) {
     addedTs: _now(),
   };
   const items = parsed.items.map(it => ({
+    ...it,
     id: itemId(fid, it.guid),
     feedId: fid,
     feedTitle: feed.title,
     feedImage: feed.image,
-    ...it,
   }));
-  await IDB.putFeed(feed);
-  await IDB.putItems(items);
   await store.dispatch(OP.INS, 'feeds', { feed, items });
   return feed;
 }
 
 async function actionUnsubscribe(fid) {
-  await IDB.deleteFeed(fid);
-  await IDB.deleteItemsByFeed(fid);
   await store.dispatch(OP.DES, 'feeds', { feedId: fid });
 }
 
@@ -1825,7 +1869,6 @@ async function actionSetFeedKind(fid, kind) {
   const cur = store.state.feeds[fid];
   if (!cur || cur.kind === kind) return;
   const next = { ...cur, kind };
-  await IDB.putFeed(next);
   await store.dispatch(OP.INS, 'feeds', { feed: next });
 }
 
@@ -1834,13 +1877,12 @@ async function actionRefresh(fid) {
   if (!feed) return;
   const parsed = await fetchFeed(feed.url);
   const items = parsed.items.map(it => ({
+    ...it,
     id: itemId(fid, it.guid),
     feedId: fid,
     feedTitle: feed.title,
     feedImage: feed.image,
-    ...it,
   }));
-  await IDB.putItems(items);
   await store.dispatch(OP.INS, 'items', { feedId: fid, items });
 }
 
@@ -2524,14 +2566,15 @@ function ResultRow({ image, icon, title, subtitle, meta, metaClass = 'text-mute'
   );
 }
 
-function SubscribeBar({ tab, onSubscribe, onNavigate }) {
+function SubscribeBar({ tab, onSubscribe, onNavigate, inputRef: externalInputRef }) {
   const [text, setText]       = useState('');
   const [focused, setFocused] = useState(false);
   const [busy, setBusy]       = useState(false);
   const [err, setErr]         = useState('');
 
   const containerRef = useRef(null);
-  const inputRef     = useRef(null);
+  const localInputRef = useRef(null);
+  const inputRef = externalInputRef || localInputRef;
 
   // close panel on outside click or escape
   useEffect(() => {
@@ -2971,7 +3014,7 @@ function ArticleReader({ item, onClose }) {
 }
 
 
-function PodsView({ openFeedId, setOpenFeedId, openItemId, setOpenItemId }) {
+function PodsView({ openFeedId, setOpenFeedId, openItemId, setOpenItemId, onAddShow }) {
   const state = useStoreState();
   const player = usePlayer();
   const openFeed = openFeedId ? state.feeds[openFeedId] : null;
@@ -2995,16 +3038,28 @@ function PodsView({ openFeedId, setOpenFeedId, openItemId, setOpenItemId }) {
 
   if (openFeed) return <FeedDetail feed={openFeed} onClose={() => setOpenFeedId(null)} onOpenItem={setOpenItemId} />;
 
-  if (podcastFeeds.length === 0) return <EmptyPodsState />;
+  if (podcastFeeds.length === 0) return <EmptyPodsState onAddShow={onAddShow} />;
 
   return (
     <div className="ink min-h-full fade-in">
       {/* Subscriptions row */}
       <section className="px-5 sm:px-8 pt-10 sm:pt-14 pb-4">
-        <div className="flex items-baseline justify-between mb-6">
+        <div className="flex items-baseline justify-between mb-6 gap-3">
           <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">Your shows</h2>
-          <span className="eo text-[10px] uppercase tracking-[0.18em] text-mute">{podcastFeeds.length} subscribed</span>
+          <div className="flex items-center gap-3">
+            <span className="eo text-[10px] uppercase tracking-[0.18em] text-mute">{podcastFeeds.length} subscribed</span>
+            {onAddShow && (
+              <button
+                onClick={onAddShow}
+                className="eo-op text-[10px] uppercase tracking-[0.18em] text-moss border border-moss/40 hover:text-ink hover:bg-moss hover:border-moss rounded-full px-2.5 py-1 tap transition-colors flex items-center gap-1"
+                title="Add a show"
+              >
+                <Icon name="plus" size={12} /> add show
+              </button>
+            )}
+          </div>
         </div>
+        <p className="eo text-[10px] uppercase tracking-[0.14em] text-mute2 mb-5">tap a cover to open · tap ⋯ to remove</p>
         <div className="flex gap-5 overflow-x-auto clean-scroll pb-3 -mx-5 px-5 sm:-mx-8 sm:px-8">
           {podcastFeeds.map(f => (
             <SourceCard key={f.id} feed={f} onOpen={setOpenFeedId} theme="dark" />
@@ -3240,15 +3295,23 @@ function FeedDetail({ feed, onClose, onOpenItem }) {
   );
 }
 
-function EmptyPodsState() {
+function EmptyPodsState({ onAddShow }) {
   return (
     <div className="ink myc-bg min-h-full flex items-center justify-center fade-in">
       <div className="max-w-md text-center px-8 py-24">
         <div className="sprout text-moss mx-auto mb-6 grow-dot" style={{ width: '44px', height: '44px' }}></div>
         <h2 className="text-2xl font-bold tracking-tight mb-4">No shows yet</h2>
-        <p className="text-[15px] text-paper/60 leading-relaxed">
+        <p className="text-[15px] text-paper/60 leading-relaxed mb-7">
           Search for a podcast above, or paste an RSS URL. Your listening position stays on this device.
         </p>
+        {onAddShow && (
+          <button
+            onClick={onAddShow}
+            className="eo-op text-[11px] uppercase tracking-[0.2em] text-moss border-2 border-moss/40 hover:text-ink hover:bg-moss hover:border-moss rounded-full px-4 py-2 tap transition-colors inline-flex items-center gap-2"
+          >
+            <Icon name="plus" size={14} /> add a show
+          </button>
+        )}
       </div>
     </div>
   );
@@ -4020,6 +4083,7 @@ function AppInner({ drawer, setDrawer }) {
   const state  = useStoreState();
   const [openFeedId, setOpenFeedId] = useState(null);
   const [openItemId, setOpenItemId] = useState(null);
+  const subscribeInputRef = useRef(null);
 
   const handleSubscribe = async (url) => {
     const feed = await actionSubscribe(url);
@@ -4028,6 +4092,15 @@ function AppInner({ drawer, setDrawer }) {
       setOpenFeedId(feed.id);
     }
     return feed;
+  };
+
+  const focusSubscribe = () => {
+    const el = subscribeInputRef.current;
+    if (!el) return;
+    setOpenItemId(null);
+    setOpenFeedId(null);
+    try { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch {}
+    el.focus({ preventScroll: false });
   };
 
   const navigate = (action) => {
@@ -4051,11 +4124,12 @@ function AppInner({ drawer, setDrawer }) {
   return (
     <div className="min-h-screen flex flex-col">
       <Masthead onMenu={() => setDrawer(true)} />
-      <SubscribeBar tab="pods" onSubscribe={handleSubscribe} onNavigate={navigate} />
+      <SubscribeBar tab="pods" onSubscribe={handleSubscribe} onNavigate={navigate} inputRef={subscribeInputRef} />
       <main className="flex-1 pb-32">
         <PodsView
           openFeedId={openFeedId} setOpenFeedId={setOpenFeedId}
           openItemId={openItemId} setOpenItemId={setOpenItemId}
+          onAddShow={focusSubscribe}
         />
       </main>
       <PlayerBar />
