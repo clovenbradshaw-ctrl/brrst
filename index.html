@@ -1380,9 +1380,35 @@ class MatrixClient {
     this.roomId = null;
   }
 
+  setHomeserver(url) {
+    if (!url) return;
+    this.homeserver = String(url).trim().replace(/\/$/, '');
+  }
+
+  // Accept either a full URL ("https://matrix.org") or a bare hostname
+  // ("matrix.org"). For bare hostnames, try .well-known/matrix/client per
+  // the spec to find the actual client API base URL — that's how matrix.org
+  // and many vanity domains delegate to a different homeserver.
+  async resolveHomeserver(input) {
+    let raw = String(input || '').trim().replace(/\/$/, '');
+    if (!raw) return null;
+    if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
+    try {
+      const u = new URL(raw);
+      const wk = await fetch(`${u.protocol}//${u.host}/.well-known/matrix/client`, { cache: 'no-store' });
+      if (wk.ok) {
+        const data = await wk.json().catch(() => null);
+        const baseUrl = data && data['m.homeserver'] && data['m.homeserver'].base_url;
+        if (baseUrl) return String(baseUrl).replace(/\/$/, '');
+      }
+    } catch { /* discovery is best-effort */ }
+    return raw;
+  }
+
   async restore() {
     const cred = await IDB.getKv('matrix.cred');
     if (!cred) return false;
+    if (cred.homeserver) this.setHomeserver(cred.homeserver);
     this.token = cred.token;
     this.userId = cred.userId;
     this.deviceId = cred.deviceId;
@@ -1398,11 +1424,14 @@ class MatrixClient {
     return false;
   }
 
-  async login(username, password) {
-    const id = username.includes(':') ? username : username;
+  async login(username, password, homeserver) {
+    if (homeserver) {
+      const resolved = await this.resolveHomeserver(homeserver);
+      if (resolved) this.setHomeserver(resolved);
+    }
     const body = {
       type: 'm.login.password',
-      identifier: { type: 'm.id.user', user: id },
+      identifier: { type: 'm.id.user', user: username },
       password,
       initial_device_display_name: 'brrst',
     };
@@ -1419,7 +1448,13 @@ class MatrixClient {
     this.token = data.access_token;
     this.userId = data.user_id;
     this.deviceId = data.device_id;
-    await IDB.setKv('matrix.cred', { token: this.token, userId: this.userId, deviceId: this.deviceId, roomId: null });
+    await IDB.setKv('matrix.cred', {
+      homeserver: this.homeserver,
+      token: this.token,
+      userId: this.userId,
+      deviceId: this.deviceId,
+      roomId: null,
+    });
     return true;
   }
 
@@ -3711,6 +3746,7 @@ function Stat({ label, value }) {
 }
 
 function LoginForm({ onDone, onCancel }) {
+  const [hs, setHs]     = useState(Matrix.homeserver || CONFIG.MATRIX_HOMESERVER);
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
@@ -3721,7 +3757,7 @@ function LoginForm({ onDone, onCancel }) {
     if (!user || !pass) return;
     setBusy(true); setErr('');
     try {
-      await Matrix.login(user, pass);
+      await Matrix.login(user, pass, hs);
       await Matrix.ensureUserRoom();
       // hydrate from matrix in case there's existing data
       await store.hydrateFromMatrix();
@@ -3735,7 +3771,11 @@ function LoginForm({ onDone, onCancel }) {
 
   return (
     <form onSubmit={submit} className="space-y-2">
+      <input type="text" value={hs} onChange={e => setHs(e.target.value)} placeholder="homeserver (e.g. matrix.org)"
+        autoCapitalize="off" autoCorrect="off" spellCheck={false}
+        className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
       <input type="text" value={user} onChange={e => setUser(e.target.value)} placeholder="username"
+        autoCapitalize="off" autoCorrect="off" spellCheck={false}
         className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
       <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="password"
         className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
