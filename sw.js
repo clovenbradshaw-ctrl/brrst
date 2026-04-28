@@ -1,5 +1,5 @@
 // brrst service worker — offline-first app shell
-const VERSION = 'brrst-v2';
+const VERSION = 'brrst-v3';
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
