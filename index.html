@@ -292,7 +292,9 @@ const CONFIG = {
   PROXY_PARAM: 'url',
 
   // ─── matrix homeserver ───
-  MATRIX_HOMESERVER: 'https://app.aminoimmigration.com',
+  // Left blank on purpose: each user supplies their own server at login,
+  // either via the dedicated field or as the suffix of "user:server.com".
+  MATRIX_HOMESERVER: '',
   MATRIX_ROOM_TOPIC: 'brrst-user-data',
   // custom matrix event types
   EVT_TRACKER:  'org.eo.brrst.tracker',   // small events posted directly to room
@@ -1373,7 +1375,7 @@ function replay(events) {
 
 class MatrixClient {
   constructor() {
-    this.homeserver = CONFIG.MATRIX_HOMESERVER.replace(/\/$/, '');
+    this.homeserver = (CONFIG.MATRIX_HOMESERVER || '').replace(/\/$/, '');
     this.token = null;
     this.userId = null;
     this.deviceId = null;
@@ -3746,18 +3748,32 @@ function Stat({ label, value }) {
 }
 
 function LoginForm({ onDone, onCancel }) {
-  const [hs, setHs]     = useState(Matrix.homeserver || CONFIG.MATRIX_HOMESERVER);
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
+  const [hs, setHs]     = useState(Matrix.homeserver || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // "alice:matrix.org" or "@alice:matrix.org" → split into user + homeserver.
+  // When present, the server-suffix wins and the homeserver field is hidden.
+  const splitId = (raw) => {
+    const trimmed = String(raw || '').trim().replace(/^@/, '');
+    const i = trimmed.indexOf(':');
+    if (i > 0 && i < trimmed.length - 1) {
+      return { username: trimmed.slice(0, i), server: trimmed.slice(i + 1) };
+    }
+    return null;
+  };
+  const parsed = splitId(user);
+
   const submit = async (e) => {
     e?.preventDefault();
-    if (!user || !pass) return;
+    const username = parsed ? parsed.username : user.trim();
+    const server   = parsed ? parsed.server   : hs.trim();
+    if (!username || !pass || !server) return;
     setBusy(true); setErr('');
     try {
-      await Matrix.login(user, pass, hs);
+      await Matrix.login(username, pass, server);
       await Matrix.ensureUserRoom();
       // hydrate from matrix in case there's existing data
       await store.hydrateFromMatrix();
@@ -3771,14 +3787,16 @@ function LoginForm({ onDone, onCancel }) {
 
   return (
     <form onSubmit={submit} className="space-y-2">
-      <input type="text" value={hs} onChange={e => setHs(e.target.value)} placeholder="homeserver (e.g. matrix.org)"
-        autoCapitalize="off" autoCorrect="off" spellCheck={false}
-        className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
-      <input type="text" value={user} onChange={e => setUser(e.target.value)} placeholder="username"
+      <input type="text" value={user} onChange={e => setUser(e.target.value)} placeholder="username (or user:server.com)"
         autoCapitalize="off" autoCorrect="off" spellCheck={false}
         className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
       <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="password"
         className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
+      {!parsed && (
+        <input type="text" value={hs} onChange={e => setHs(e.target.value)} placeholder="homeserver (e.g. matrix.org)"
+          autoCapitalize="off" autoCorrect="off" spellCheck={false}
+          className="w-full bg-ink3 px-3 py-2.5 text-sm font-mono text-paper border border-paper/15 outline-none focus:border-moss/60 rounded-xl" />
+      )}
       <div className="flex gap-2">
         <button type="submit" disabled={busy}
           className="flex-1 py-2.5 border border-moss/40 text-moss eo text-[11px] uppercase tracking-[0.2em] hover:bg-moss/10 tap disabled:opacity-50 rounded-full">
