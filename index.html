@@ -1968,6 +1968,8 @@ function usePlayer() { return useContext(PlayerCtx); }
 
 function PlayerProvider({ children }) {
   const audioRef = useRef(null);
+  const playTokenRef = useRef(0);     // supersedes in-flight loads when switching items
+  const pendingSeekRef = useRef(null); // applied once metadata loads (iOS can't seek before)
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -1978,10 +1980,13 @@ function PlayerProvider({ children }) {
     if (!audioRef.current) {
       const audio = document.createElement('audio');
       audio.preload = 'metadata';
+      // iOS Safari/PWA: required for inline (non-fullscreen) playback and
+      // prevents the "tap-to-play stalls until metadata" PWA bug.
+      audio.setAttribute('playsinline', '');
+      audio.setAttribute('webkit-playsinline', '');
       document.body.appendChild(audio);
       audioRef.current = audio;
     }
-    return () => { /* keep audio across remounts */ };
   }, []);
 
   useEffect(() => {
@@ -1992,8 +1997,17 @@ function PlayerProvider({ children }) {
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onEnd = () => setPlaying(false);
+    // Apply queued seek as soon as the browser admits it. iOS in particular
+    // ignores currentTime writes until HAVE_METADATA, so playItem queues here.
+    const onLoaded = () => {
+      const t = pendingSeekRef.current;
+      pendingSeekRef.current = null;
+      if (t == null) return;
+      try { audio.currentTime = t; } catch {}
+    };
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('loadedmetadata', onDur);
+    audio.addEventListener('loadedmetadata', onLoaded);
     audio.addEventListener('durationchange', onDur);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
@@ -2001,6 +2015,7 @@ function PlayerProvider({ children }) {
     return () => {
       audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('loadedmetadata', onDur);
+      audio.removeEventListener('loadedmetadata', onLoaded);
       audio.removeEventListener('durationchange', onDur);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
@@ -2021,39 +2036,118 @@ function PlayerProvider({ children }) {
     return () => clearInterval(id);
   }, [playing]);
 
-  // Media Session API (lock-screen controls)
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
-    navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
-    navigator.mediaSession.setActionHandler('seekbackward', () => seek(-15));
-    navigator.mediaSession.setActionHandler('seekforward', () => seek(30));
-  }, []);
-
-  const playItem = useCallback(async (item) => {
+  const playItem = useCallback(async (item, opts = {}) => {
     if (!item?.audio) return;
     const audio = audioRef.current;
-    audio.src = item.audio;
+    if (!audio) return;
+
+    // New play supersedes any in-flight loadedmetadata-deferred seeks.
+    const token = ++playTokenRef.current;
+
     const saved = store.state.plays[item.id]?.positionSec || 0;
-    if (saved > 0 && saved < (item.duration || 1e9) - 5) audio.currentTime = saved;
+    // If the saved position is at/past the end, treat the next play as a
+    // restart — the user already finished this episode. Same when caller
+    // explicitly asks for restart.
+    const finished = item.duration > 0 && saved >= item.duration - 5;
+    const startAt = (opts.restart || finished) ? 0 : saved;
+
+    let absUrl = item.audio;
+    try { absUrl = new URL(item.audio, location.href).href; } catch {}
+    const sameSource = audio.src === absUrl || audio.currentSrc === absUrl;
+
+    if (!sameSource) {
+      audio.src = item.audio;
+      // Kick off buffering immediately. Without this, iOS PWA waits for the
+      // play() call before initiating the network request, which is the main
+      // contributor to "slow audio start" in standalone mode.
+      try { audio.load(); } catch {}
+    }
     audio.playbackRate = rate;
-    await audio.play().catch(e => console.warn('play failed', e));
+
+    // Seek when we can: if metadata's already loaded (same-source case), do
+    // it now; otherwise queue for the loadedmetadata listener.
+    if (audio.readyState >= 1 /* HAVE_METADATA */) {
+      try {
+        if (Math.abs((audio.currentTime || 0) - startAt) > 0.25) {
+          audio.currentTime = startAt;
+        }
+      } catch {}
+      pendingSeekRef.current = null;
+    } else {
+      pendingSeekRef.current = startAt;
+    }
+
+    try { await audio.play(); }
+    catch (e) { console.warn('play failed', e); }
+
+    if (token !== playTokenRef.current) return; // user moved on; don't clobber state
+
     await actionSetPlaying(item.id);
+
     if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: item.title,
-        artist: item.feedTitle || item.author,
-        album: 'brrst',
-        artwork: item.image ? [{ src: item.image, sizes: '512x512' }] : [],
-      });
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: item.title || '',
+          artist: item.feedTitle || item.author || '',
+          album: 'brrst',
+          artwork: item.image ? [{ src: item.image, sizes: '512x512' }] : [],
+        });
+      } catch {}
     }
   }, [rate]);
 
+  const resumeOrLoad = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    // PWA recovery: when iOS evicts the audio element's source after long
+    // backgrounding, audio.src is empty / readyState 0. Reload from the
+    // store so the play button works without forcing the user to switch
+    // episodes.
+    if (!audio.src || audio.readyState === 0) {
+      const np = store.state.nowPlaying;
+      const it = np ? store.state.items[np] : null;
+      if (it?.audio) playItem(it).catch(() => {});
+      return;
+    }
+    audio.play().catch(e => console.warn('play failed', e));
+  }, [playItem]);
+
   const toggle = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio?.src) return;
-    if (audio.paused) audio.play(); else audio.pause();
-  }, []);
+    if (!audio) return;
+
+    if (!audio.src || audio.readyState === 0) {
+      resumeOrLoad();
+      return;
+    }
+
+    // At end of track: tapping play should restart from 0, not no-op.
+    const dur = audio.duration || 0;
+    if (audio.ended || (dur > 0 && audio.currentTime >= dur - 0.25)) {
+      try { audio.currentTime = 0; } catch {}
+      audio.play().catch(e => console.warn('restart failed', e));
+      return;
+    }
+
+    if (audio.paused) {
+      audio.play().catch(e => console.warn('play failed', e));
+    } else {
+      audio.pause();
+    }
+  }, [resumeOrLoad]);
+
+  const restart = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!audio.src || audio.readyState === 0) {
+      const np = store.state.nowPlaying;
+      const it = np ? store.state.items[np] : null;
+      if (it?.audio) playItem(it, { restart: true }).catch(() => {});
+      return;
+    }
+    try { audio.currentTime = 0; } catch {}
+    audio.play().catch(e => console.warn('restart failed', e));
+  }, [playItem]);
 
   const seek = useCallback((delta) => {
     const audio = audioRef.current;
@@ -2072,8 +2166,39 @@ function PlayerProvider({ children }) {
     if (audioRef.current) audioRef.current.playbackRate = r;
   }, []);
 
+  // Media Session API (lock-screen / OS controls). Re-bind when handlers
+  // change so the captured closures stay current — otherwise the lock-screen
+  // play button can call into a stale playItem after the first item.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    try {
+      ms.setActionHandler('play', () => resumeOrLoad());
+      ms.setActionHandler('pause', () => audioRef.current?.pause());
+      ms.setActionHandler('seekbackward', (e) => seek(-(e?.seekOffset || 15)));
+      ms.setActionHandler('seekforward', (e) => seek(e?.seekOffset || 30));
+      try { ms.setActionHandler('seekto', (e) => { if (e?.seekTime != null) seekTo(e.seekTime); }); } catch {}
+    } catch {}
+  }, [resumeOrLoad, seek, seekTo]);
+
+  // Keep the OS scrubber accurate and reflect play/pause to the lock screen.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    try { ms.playbackState = playing ? 'playing' : 'paused'; } catch {}
+    if (typeof ms.setPositionState !== 'function') return;
+    if (!duration || !isFinite(duration)) return;
+    try {
+      ms.setPositionState({
+        duration,
+        playbackRate: rate || 1,
+        position: Math.min(Math.max(0, position), duration),
+      });
+    } catch {}
+  }, [playing, position, duration, rate]);
+
   return (
-    <PlayerCtx.Provider value={{ playing, position, duration, rate, playItem, toggle, seek, seekTo, setSpeed }}>
+    <PlayerCtx.Provider value={{ playing, position, duration, rate, playItem, toggle, seek, seekTo, setSpeed, restart }}>
       {children}
     </PlayerCtx.Provider>
   );
