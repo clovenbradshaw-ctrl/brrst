@@ -204,6 +204,17 @@
   .prose blockquote { border-left: 2px solid var(--moss); padding-left: 1.1em; margin-left: 0; font-style: italic; color: var(--mute); }
   .prose pre, .prose code { font-family: 'JetBrains Mono', monospace; font-size: 0.9em; background: rgba(0,0,0,0.05); padding: 0.1em 0.3em; border-radius: 2px; }
 
+  /* dark-theme prose for episode pages */
+  .prose-dark { font-family: 'Inter', system-ui, sans-serif; max-width: 38rem; }
+  .prose-dark p { margin: 0.9em 0; line-height: 1.7; font-size: 1rem; color: rgba(245,243,238,0.78); }
+  .prose-dark a { color: var(--moss); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  .prose-dark img { max-width: 100%; height: auto; margin: 1em 0; border-radius: 8px; }
+  .prose-dark h1, .prose-dark h2, .prose-dark h3 { font-weight: 700; letter-spacing: -0.02em; margin-top: 1.6em; color: rgba(245,243,238,0.95); }
+  .prose-dark ul, .prose-dark ol { margin: 0.9em 0; padding-left: 1.4em; line-height: 1.7; color: rgba(245,243,238,0.78); }
+  .prose-dark li { margin: 0.3em 0; }
+  .prose-dark blockquote { border-left: 2px solid var(--moss); padding-left: 1.1em; margin-left: 0; font-style: italic; color: rgba(245,243,238,0.6); }
+  .prose-dark pre, .prose-dark code { font-family: 'JetBrains Mono', monospace; font-size: 0.9em; background: rgba(255,255,255,0.06); padding: 0.1em 0.3em; border-radius: 2px; color: rgba(245,243,238,0.9); }
+
   /* ios-style wiggle for nav reorder mode */
   @keyframes wiggleA {
     0%, 100% { transform: rotate(-1.2deg); }
@@ -2207,29 +2218,21 @@ function NavTabs({ tab, setTab }) {
   );
 }
 
-function Masthead({ tab, setTab, onMenu }) {
+function Masthead({ onMenu }) {
   return (
     <header className="border-b border-paper/10 ink relative z-20">
-      <div className="px-4 sm:px-6 pt-3 sm:pt-4 pb-2 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="px-5 sm:px-8 pt-6 sm:pt-8 pb-5 sm:pb-6 flex items-center justify-between">
+        <div className="flex items-center gap-4">
           <button onClick={onMenu} className="text-paper/70 hover:text-paper tap p-1 -ml-1">
             <Icon name="menu" size={20} />
           </button>
-          <div>
-            <div className="text-[26px] sm:text-[30px] font-extrabold tracking-tighter leading-none flex items-baseline gap-1.5">
-              <span className="text-paper lowercase">brrst</span>
-              <span className="sprout text-moss grow-dot"></span>
-            </div>
-            <div className="eo text-[9px] sm:text-[10px] text-mute uppercase tracking-[0.22em] mt-1">an emergent reader</div>
+          <div className="text-[28px] sm:text-[34px] font-extrabold tracking-tighter leading-none flex items-baseline gap-1.5">
+            <span className="text-paper lowercase">brrst</span>
+            <span className="sprout text-moss grow-dot"></span>
           </div>
         </div>
-        <div className="text-right">
-          <div className="eo text-[10px] text-mute tabular-nums">{new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
-          <div className="eo text-[9px] text-moss2 uppercase tracking-[0.18em] mt-0.5">↬ growing</div>
-        </div>
+        <div className="eo text-[10px] sm:text-[11px] text-mute uppercase tracking-[0.22em]">podcasts</div>
       </div>
-      <div className="myc-rule mx-4 sm:mx-6"></div>
-      <NavTabs tab={tab} setTab={setTab} />
     </header>
   );
 }
@@ -2548,10 +2551,10 @@ function SubscribeBar({ tab, onSubscribe, onNavigate }) {
   const ctaLabel  = cls.kind === 'url' ? 'INS' : (cls.kind === 'domain' ? '↬' : '↵');
 
   return (
-    <div ref={containerRef} className="relative mx-4 sm:mx-6 my-3 z-30">
+    <div ref={containerRef} className="relative mx-5 sm:mx-8 mt-6 mb-2 z-30">
       <form
         onSubmit={submit}
-        className="px-4 py-2.5 ink2 border border-paper/10 hover:border-moss/30 focus-within:border-moss/40 transition-colors flex gap-2 items-center rounded-full"
+        className="px-5 py-3 ink2 border border-paper/10 hover:border-moss/30 focus-within:border-moss/40 transition-colors flex gap-3 items-center rounded-full"
       >
         <Icon name="search" size={15} className="text-moss flex-shrink-0" />
         <input
@@ -2560,7 +2563,7 @@ function SubscribeBar({ tab, onSubscribe, onNavigate }) {
           value={text}
           onChange={e => { setText(e.target.value); setErr(''); }}
           onFocus={() => setFocused(true)}
-          placeholder="search · paste a URL · or type a site"
+          placeholder="search podcasts · or paste an RSS URL"
           className="flex-1 bg-transparent border-none outline-none text-sm placeholder:text-mute2 text-paper font-mono min-w-0"
           autoComplete="off"
           autoCorrect="off"
@@ -2725,8 +2728,6 @@ function SourceCard({ feed, onOpen, theme = 'dark' }) {
   }, [menu]);
 
   const isPodcast = feed.kind === 'podcast';
-  const targetKind = isPodcast ? 'news' : 'podcast';
-  const targetLabel = isPodcast ? 'news' : 'podcasts';
 
   const isLight = theme === 'light';
   const tileBg = isLight
@@ -2738,7 +2739,6 @@ function SourceCard({ feed, onOpen, theme = 'dark' }) {
   const menuPanel  = isLight
     ? 'bg-paper border border-ink/15 text-ink'
     : 'ink2 border border-paper/15 text-paper';
-  const menuMove   = isLight ? 'hover:bg-ink/5' : 'hover:bg-paper/10';
   const menuDel    = isLight ? 'text-rust hover:bg-rust/10' : 'text-rust hover:bg-rust/15';
 
   const openMenu = (e) => {
@@ -2752,20 +2752,15 @@ function SourceCard({ feed, onOpen, theme = 'dark' }) {
     setMenu(true);
   };
 
-  const handleMove = async () => {
-    setMenu(false);
-    try { await actionSetFeedKind(feed.id, targetKind); }
-    catch (e) { console.warn('move feed failed:', e); }
-  };
   const handleDelete = () => {
     setMenu(false);
     if (confirm(`Unsubscribe from "${feed.title}"?`)) actionUnsubscribe(feed.id);
   };
 
   return (
-    <div className="flex-shrink-0 w-32 sm:w-36 relative">
+    <div className="flex-shrink-0 w-36 sm:w-44 relative">
       <button onClick={() => onOpen(feed.id)} className="block text-left tap w-full">
-        <div className={`aspect-square mb-2 overflow-hidden rounded-2xl ${tileBg}`}>
+        <div className={`aspect-square mb-3 overflow-hidden rounded-2xl ${tileBg}`}>
           {feed.image ? (
             <img src={feed.image} alt={feed.title} className="w-full h-full object-cover" loading="lazy" />
           ) : (
@@ -2774,8 +2769,8 @@ function SourceCard({ feed, onOpen, theme = 'dark' }) {
             </div>
           )}
         </div>
-        <div className={`text-[13px] font-medium leading-snug clamp-2 ${titleClass}`}>{feed.title}</div>
-        <div className={`eo text-[9px] ${metaClass} uppercase tracking-[0.12em] mt-1 clamp-1`}>{feed.author || shortUrl(feed.url)}</div>
+        <div className={`text-[14px] font-medium leading-snug clamp-2 ${titleClass}`}>{feed.title}</div>
+        <div className={`eo text-[9px] ${metaClass} uppercase tracking-[0.12em] mt-1.5 clamp-1`}>{feed.author || shortUrl(feed.url)}</div>
       </button>
       <button
         ref={triggerRef}
@@ -2789,11 +2784,6 @@ function SourceCard({ feed, onOpen, theme = 'dark' }) {
           ref={menuRef}
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: 176, zIndex: 1000 }}
           className={`rounded-xl py-1 shadow-xl fade-in ${menuPanel}`}>
-          <button onClick={handleMove}
-            className={`w-full text-left px-3 py-2 text-[12.5px] eo tracking-tight flex items-center gap-2 ${menuMove}`}>
-            <Icon name="swap" size={14} />
-            move to {targetLabel}
-          </button>
           <button onClick={handleDelete}
             className={`w-full text-left px-3 py-2 text-[12.5px] eo tracking-tight flex items-center gap-2 ${menuDel}`}>
             <Icon name="trash" size={14} />
@@ -2944,10 +2934,11 @@ function ArticleReader({ item, onClose }) {
 }
 
 
-function PodsView({ openFeedId, setOpenFeedId }) {
+function PodsView({ openFeedId, setOpenFeedId, openItemId, setOpenItemId }) {
   const state = useStoreState();
   const player = usePlayer();
   const openFeed = openFeedId ? state.feeds[openFeedId] : null;
+  const openItem = openItemId ? state.items[openItemId] : null;
   const [sort, setSort] = useSort('pods.latest', 'newest');
 
   const podcastFeeds = useMemo(() => {
@@ -2963,31 +2954,33 @@ function PodsView({ openFeedId, setOpenFeedId }) {
     return applySort(filtered, sort, state.plays).slice(0, 80);
   }, [state.items, podcastFeeds, sort, state.plays]);
 
-  if (openFeed) return <FeedDetail feed={openFeed} onClose={() => setOpenFeedId(null)} />;
+  if (openItem) return <EpisodeView item={openItem} onClose={() => setOpenItemId(null)} />;
+
+  if (openFeed) return <FeedDetail feed={openFeed} onClose={() => setOpenFeedId(null)} onOpenItem={setOpenItemId} />;
 
   if (podcastFeeds.length === 0) return <EmptyPodsState />;
 
   return (
     <div className="ink min-h-full fade-in">
       {/* Subscriptions row */}
-      <section className="px-4 sm:px-6 pt-7 pb-2">
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-lg font-semibold tracking-tight">Your shows</h2>
+      <section className="px-5 sm:px-8 pt-10 sm:pt-14 pb-4">
+        <div className="flex items-baseline justify-between mb-6">
+          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">Your shows</h2>
           <span className="eo text-[10px] uppercase tracking-[0.18em] text-mute">{podcastFeeds.length} subscribed</span>
         </div>
-        <div className="flex gap-3 overflow-x-auto clean-scroll pb-2 -mx-4 px-4 sm:-mx-6 sm:px-6">
+        <div className="flex gap-5 overflow-x-auto clean-scroll pb-3 -mx-5 px-5 sm:-mx-8 sm:px-8">
           {podcastFeeds.map(f => (
             <SourceCard key={f.id} feed={f} onOpen={setOpenFeedId} theme="dark" />
           ))}
         </div>
       </section>
 
-      <div className="myc-rule mx-4 sm:mx-6 my-5"></div>
+      <div className="myc-rule mx-5 sm:mx-8 my-10 sm:my-14"></div>
 
       {/* Recent episodes */}
-      <section className="px-4 sm:px-6 pb-32">
-        <div className="flex items-baseline justify-between mb-3 gap-3">
-          <h2 className="text-lg font-semibold tracking-tight">Latest</h2>
+      <section className="px-5 sm:px-8 pb-32">
+        <div className="flex items-baseline justify-between mb-6 gap-3">
+          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight">Latest</h2>
           <div className="flex items-center gap-3">
             <span className="eo text-[10px] uppercase tracking-[0.18em] text-mute hidden sm:inline">{recentEps.length} episodes</span>
             <SortPicker value={sort} onChange={setSort} options={POD_SORT_OPTS} />
@@ -2995,7 +2988,7 @@ function PodsView({ openFeedId, setOpenFeedId }) {
         </div>
         <ul className="divide-y divide-paper/6">
           {recentEps.map(ep => (
-            <EpisodeRow key={ep.id} item={ep} />
+            <EpisodeRow key={ep.id} item={ep} onOpen={setOpenItemId} />
           ))}
         </ul>
       </section>
@@ -3003,46 +2996,44 @@ function PodsView({ openFeedId, setOpenFeedId }) {
   );
 }
 
-function EpisodeRow({ item, hideShow = false }) {
+function EpisodeRow({ item, hideShow = false, onOpen }) {
   const player = usePlayer();
   const state = useStoreState();
   const isCurrent = state.nowPlaying === item.id;
   const play = state.plays[item.id];
-  const [expanded, setExpanded] = useState(false);
   const positionPct = play?.positionSec && item.duration ? Math.min(100, (play.positionSec / item.duration) * 100) : 0;
 
+  const open = () => onOpen?.(item.id);
+
   return (
-    <li className="py-3 sm:py-4">
-      <div className="flex gap-3">
+    <li className="py-5 sm:py-6">
+      <div className="flex gap-4 sm:gap-5">
         {item.image && !hideShow && (
-          <div className="w-14 h-14 sm:w-16 sm:h-16 flex-shrink-0 bg-ink3 rounded-xl overflow-hidden">
+          <button onClick={open} className="w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 bg-ink3 rounded-xl overflow-hidden tap">
             <img src={item.image} alt="" className="w-full h-full object-cover" loading="lazy" />
-          </div>
+          </button>
         )}
         <div className="flex-1 min-w-0">
-          {!hideShow && <div className="eo text-[10px] uppercase tracking-[0.15em] text-moss/80 mb-0.5 clamp-1">{item.feedTitle}</div>}
-          <button onClick={() => setExpanded(e => !e)} className="text-left w-full">
-            <div className={`text-[14.5px] font-medium leading-snug ${play?.played ? 'text-mute' : 'text-paper'} clamp-2`}>{item.title}</div>
+          {!hideShow && <div className="eo text-[10px] uppercase tracking-[0.15em] text-moss/80 mb-1 clamp-1">{item.feedTitle}</div>}
+          <button onClick={open} className="text-left w-full">
+            <div className={`text-[15.5px] sm:text-[16px] font-medium leading-snug ${play?.played ? 'text-mute' : 'text-paper'} clamp-2`}>{item.title}</div>
           </button>
-          <div className="flex items-center gap-3 mt-2 text-[11px] text-mute eo tabular-nums">
+          <div className="flex items-center gap-3 mt-3 text-[11px] text-mute eo tabular-nums">
             <span>{fmtDate(item.pubTs)}</span>
             {item.duration > 0 && <span>· {fmtTime(item.duration)}</span>}
             {play?.played && <span className="text-sage">· played</span>}
             {play?.positionSec > 0 && !play?.played && <span className="text-moss">· {fmtTime(play.positionSec)} in</span>}
           </div>
-          {expanded && (
-            <p className="text-[13px] text-paper/70 mt-2 leading-relaxed">{item.desc}</p>
-          )}
         </div>
-        <div className="flex flex-col items-end gap-1.5">
+        <div className="flex flex-col items-end gap-2">
           <button
             onClick={() => isCurrent ? player.toggle() : player.playItem(item)}
-            className={`w-10 h-10 rounded-full border-2 ${isCurrent && player.playing ? 'border-moss bg-moss text-ink pulse-moss' : 'border-paper/25 text-paper hover:border-moss hover:text-moss'} flex items-center justify-center tap transition-colors`}
+            className={`w-12 h-12 rounded-full border-2 ${isCurrent && player.playing ? 'border-moss bg-moss text-ink pulse-moss' : 'border-paper/25 text-paper hover:border-moss hover:text-moss'} flex items-center justify-center tap transition-colors`}
             disabled={!item.audio}
           >
-            <Icon name={isCurrent && player.playing ? 'pause' : 'play'} size={14} />
+            <Icon name={isCurrent && player.playing ? 'pause' : 'play'} size={16} />
           </button>
-          <div className="flex gap-1.5">
+          <div className="flex gap-2">
             <button onClick={() => actionSave(item.id, !!state.saved[item.id])} className={`tap ${state.saved[item.id] ? 'text-rust' : 'text-mute hover:text-paper'}`}>
               <Icon name={state.saved[item.id] ? 'bookmark-fill' : 'bookmark'} size={14} />
             </button>
@@ -3053,11 +3044,98 @@ function EpisodeRow({ item, hideShow = false }) {
         </div>
       </div>
       {positionPct > 0 && positionPct < 100 && (
-        <div className="ml-[calc(56px+0.75rem)] sm:ml-[calc(64px+0.75rem)] mt-2 h-[2px] bg-paper/8 relative rounded-full overflow-hidden">
+        <div className="ml-[calc(64px+1rem)] sm:ml-[calc(80px+1.25rem)] mt-3 h-[2px] bg-paper/8 relative rounded-full overflow-hidden">
           <div className="absolute inset-y-0 left-0 bg-moss rounded-full" style={{ width: `${positionPct}%` }} />
         </div>
       )}
     </li>
+  );
+}
+
+function EpisodeView({ item, onClose }) {
+  const state = useStoreState();
+  const player = usePlayer();
+  const isCurrent = state.nowPlaying === item.id;
+  const play = state.plays[item.id];
+  const dur = (isCurrent ? player.duration : 0) || item.duration || 0;
+  const pos = isCurrent ? player.position : (play?.positionSec || 0);
+  const pct = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
+  const isSaved = !!state.saved[item.id];
+  const isQueued = state.queue.includes(item.id);
+  const ctaLabel = isCurrent && player.playing
+    ? 'pause'
+    : (pos > 0 && !play?.played ? 'resume' : 'play');
+
+  return (
+    <div className="ink min-h-full fade-in">
+      <div className="sticky top-0 z-10 ink2 border-b border-paper/10 px-5 sm:px-8 py-4 flex items-center justify-between">
+        <button onClick={onClose} className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-paper tap">
+          ← back
+        </button>
+        <div className="flex items-center gap-5">
+          <button onClick={() => actionSave(item.id, isSaved)} className={`tap ${isSaved ? 'text-rust' : 'text-paper/60 hover:text-paper'}`}>
+            <Icon name={isSaved ? 'bookmark-fill' : 'bookmark'} size={18} />
+          </button>
+          <button onClick={() => actionEnqueue(item.id, isQueued)} className={`tap ${isQueued ? 'text-moss' : 'text-paper/60 hover:text-paper'}`}>
+            <Icon name="queue" size={18} />
+          </button>
+          {item.link && (
+            <a href={item.link} target="_blank" rel="noopener" className="text-paper/60 hover:text-moss2 tap">
+              <Icon name="external" size={18} />
+            </a>
+          )}
+        </div>
+      </div>
+
+      <article className="px-5 sm:px-8 py-10 sm:py-14 max-w-2xl mx-auto">
+        <div className="eo text-[10px] uppercase tracking-[0.2em] text-moss mb-5">
+          {item.feedTitle}
+          <span className="text-mute2"> · {fmtDate(item.pubTs)}</span>
+          {item.duration > 0 && <span className="text-mute2"> · {fmtTime(item.duration)}</span>}
+        </div>
+        <h1 className="text-[26px] sm:text-[34px] font-bold leading-[1.15] tracking-tight mb-8 text-balance">{item.title}</h1>
+
+        {item.image && (
+          <div className="mb-10 rounded-2xl overflow-hidden cover-shadow max-w-sm mx-auto">
+            <img src={item.image} alt="" className="w-full aspect-square object-cover" />
+          </div>
+        )}
+
+        <div className="mb-12">
+          <div className="flex justify-center">
+            <button
+              onClick={() => isCurrent ? player.toggle() : player.playItem(item)}
+              disabled={!item.audio}
+              className={`flex items-center gap-3 px-8 py-3.5 rounded-full eo text-[12px] uppercase tracking-[0.2em] tap transition-colors disabled:opacity-40 ${isCurrent && player.playing ? 'bg-moss text-ink shadow-lg shadow-moss/25' : 'border-2 border-moss text-moss hover:bg-moss/10'}`}
+            >
+              <Icon name={isCurrent && player.playing ? 'pause' : 'play'} size={14} />
+              {ctaLabel}
+            </button>
+          </div>
+          {pct > 0 && pct < 100 && (
+            <div className="mt-6 max-w-md mx-auto">
+              <div className="h-[3px] bg-paper/10 rounded-full overflow-hidden">
+                <div className="h-full bg-moss rounded-full" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="flex justify-between eo text-[10px] text-mute tabular-nums mt-2">
+                <span>{fmtTime(pos)}</span>
+                <span>−{fmtTime(Math.max(0, dur - pos))}</span>
+              </div>
+            </div>
+          )}
+          {play?.played && (
+            <div className="mt-5 text-center eo text-[10px] uppercase tracking-[0.18em] text-sage">✓ played</div>
+          )}
+          {!item.audio && (
+            <div className="mt-5 text-center eo text-[10px] uppercase tracking-[0.18em] text-mute2">no audio in this item</div>
+          )}
+        </div>
+
+        {(item.descHtml || item.desc) && (
+          <div className="prose-dark" dangerouslySetInnerHTML={{ __html: item.descHtml || item.desc }} />
+        )}
+      </article>
+    </div>
   );
 }
 
@@ -3080,89 +3158,15 @@ function FeedDetail({ feed, onClose, onOpenItem }) {
     if (confirm(`Unsubscribe from "${feed.title}"?`)) { actionUnsubscribe(feed.id); onClose(); }
   };
 
-  const targetKind = isPodcast ? 'news' : 'podcast';
-  const targetLabel = isPodcast ? 'news' : 'podcasts';
-  const move = async () => {
-    if (!confirm(`Move "${feed.title}" to ${targetLabel}?`)) return;
-    try { await actionSetFeedKind(feed.id, targetKind); onClose(); }
-    catch (e) { console.warn('move feed failed:', e); }
-  };
-
-  if (!isPodcast) {
-    return (
-      <div className="paper-grain text-ink min-h-full fade-in">
-        <div className="sticky top-0 z-10 paper-grain border-b border-ink/15 px-4 sm:px-6 py-3 flex items-center justify-between">
-          <button onClick={onClose} className="eo text-[11px] uppercase tracking-[0.18em] text-ink/60 hover:text-ink tap">
-            ← back
-          </button>
-          <div className="flex items-center gap-3">
-            <button onClick={refresh} disabled={refreshing} className={`text-ink/60 hover:text-ink tap ${refreshing ? 'animate-spin' : ''}`}>
-              <Icon name="refresh" size={18} />
-            </button>
-            <button onClick={move}
-              title={`Move to ${targetLabel}`}
-              className="eo text-[11px] uppercase tracking-[0.18em] text-ink/60 hover:text-moss tap flex items-center gap-1">
-              <Icon name="swap" size={14} /> MOV
-            </button>
-            <button onClick={unsubscribe}
-              title="Delete (unsubscribe)"
-              className="eo text-[11px] uppercase tracking-[0.18em] text-ink/60 hover:text-rust tap flex items-center gap-1">
-              <Icon name="trash" size={14} /> DES
-            </button>
-          </div>
-        </div>
-
-        <div className="px-4 sm:px-6 py-6 max-w-5xl mx-auto flex gap-4 sm:gap-6 border-b border-ink/15">
-          {feed.image && (
-            <div className="w-20 h-20 sm:w-28 sm:h-28 flex-shrink-0 rounded-2xl overflow-hidden bg-ink/5 border border-ink/10">
-              <img src={feed.image} alt={feed.title} className="w-full h-full object-cover" />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="eo text-[10px] uppercase tracking-[0.2em] text-moss mb-1">news source</div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight mb-2">{feed.title}</h1>
-            {feed.author && <div className="text-[13px] italic text-ink/60 mb-2">{feed.author}</div>}
-            <p className="text-sm text-ink/70 clamp-3 leading-relaxed">{feed.description}</p>
-            <div className="eo text-[10px] text-ink/40 mt-3">{items.length} items · {shortUrl(feed.url)}</div>
-          </div>
-        </div>
-
-        <div className="px-4 sm:px-6 pt-4 pb-2 max-w-5xl mx-auto flex justify-end">
-          <SortPicker value={sort} onChange={setSort} options={NEWS_SORT_OPTS} theme="light" />
-        </div>
-
-        <div className="px-4 sm:px-6 pb-16 max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-8">
-          {items.map(item => (
-            <article key={item.id} onClick={() => onOpenItem?.(item.id)} className="cursor-pointer tap pb-5">
-              <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss/80 mb-1.5">{fmtDate(item.pubTs)}</div>
-              <h2 className="text-base font-semibold leading-snug tracking-tight mb-2 clamp-3">{item.title}</h2>
-              {item.image && (
-                <div className="float-right ml-3 mb-1 -mt-1">
-                  <img src={item.image} alt="" className="w-20 h-20 sm:w-24 sm:h-24 object-cover rounded-xl" loading="lazy" />
-                </div>
-              )}
-              <p className="text-[13px] leading-relaxed text-ink/65 clamp-3">{item.desc}</p>
-            </article>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="ink min-h-full fade-in">
-      <div className="sticky top-0 z-10 ink2 border-b border-paper/10 px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div className="sticky top-0 z-10 ink2 border-b border-paper/10 px-5 sm:px-8 py-4 flex items-center justify-between">
         <button onClick={onClose} className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-paper tap">
           ← back
         </button>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <button onClick={refresh} disabled={refreshing} className={`text-paper/60 hover:text-paper tap ${refreshing ? 'animate-spin' : ''}`}>
             <Icon name="refresh" size={18} />
-          </button>
-          <button onClick={move}
-            title={`Move to ${targetLabel}`}
-            className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-moss tap flex items-center gap-1">
-            <Icon name="swap" size={14} /> MOV
           </button>
           <button onClick={unsubscribe}
             title="Delete (unsubscribe)"
@@ -3173,27 +3177,27 @@ function FeedDetail({ feed, onClose, onOpenItem }) {
       </div>
 
       {/* Feed header */}
-      <div className="px-4 sm:px-6 py-6 flex gap-4 sm:gap-6 border-b border-paper/10">
+      <div className="px-5 sm:px-8 py-10 flex gap-5 sm:gap-8 border-b border-paper/10">
         {feed.image && (
-          <div className="w-28 h-28 sm:w-40 sm:h-40 flex-shrink-0 cover-shadow rounded-2xl overflow-hidden">
+          <div className="w-32 h-32 sm:w-44 sm:h-44 flex-shrink-0 cover-shadow rounded-2xl overflow-hidden">
             <img src={feed.image} alt={feed.title} className="w-full h-full object-cover" />
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-1">{feed.kind === 'podcast' ? 'podcast' : 'feed'}</div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight mb-2">{feed.title}</h1>
-          {feed.author && <div className="text-[13px] italic text-paper/60 mb-2">{feed.author}</div>}
+          <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-2">podcast</div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight leading-tight mb-3">{feed.title}</h1>
+          {feed.author && <div className="text-[14px] italic text-paper/60 mb-3">{feed.author}</div>}
           <p className="text-sm text-paper/70 clamp-3 leading-relaxed">{feed.description}</p>
-          <div className="eo text-[10px] text-mute mt-3">{items.length} items · {shortUrl(feed.url)}</div>
+          <div className="eo text-[10px] text-mute mt-4">{items.length} episodes · {shortUrl(feed.url)}</div>
         </div>
       </div>
 
-      <div className="px-4 sm:px-6 pt-4 pb-2 flex justify-end">
-        <SortPicker value={sort} onChange={setSort} options={feed.kind === 'podcast' ? FEED_SORT_OPTS : NEWS_SORT_OPTS} />
+      <div className="px-5 sm:px-8 pt-6 pb-2 flex justify-end">
+        <SortPicker value={sort} onChange={setSort} options={FEED_SORT_OPTS} />
       </div>
 
-      <ul className="divide-y divide-paper/6 px-4 sm:px-6 pb-32">
-        {items.map(it => <EpisodeRow key={it.id} item={it} hideShow />)}
+      <ul className="divide-y divide-paper/6 px-5 sm:px-8 pb-32">
+        {items.map(it => <EpisodeRow key={it.id} item={it} hideShow onOpen={onOpenItem} />)}
       </ul>
     </div>
   );
@@ -3202,13 +3206,12 @@ function FeedDetail({ feed, onClose, onOpenItem }) {
 function EmptyPodsState() {
   return (
     <div className="ink myc-bg min-h-full flex items-center justify-center fade-in">
-      <div className="max-w-md text-center px-6 py-16">
-        <div className="sprout text-moss mx-auto mb-4 grow-dot" style={{ width: '36px', height: '36px' }}></div>
-        <h2 className="text-xl font-bold tracking-tight mb-3">No shows yet</h2>
-        <p className="text-[14px] text-paper/60 leading-relaxed mb-2">
-          Paste a podcast RSS URL above. The player keeps your position locally, syncs to your Matrix room, and never tells anyone what you listened to.
+      <div className="max-w-md text-center px-8 py-24">
+        <div className="sprout text-moss mx-auto mb-6 grow-dot" style={{ width: '44px', height: '44px' }}></div>
+        <h2 className="text-2xl font-bold tracking-tight mb-4">No shows yet</h2>
+        <p className="text-[15px] text-paper/60 leading-relaxed">
+          Search for a podcast above, or paste an RSS URL. Your listening position stays on this device.
         </p>
-        <p className="eo text-[10px] uppercase tracking-[0.18em] text-mute2 mt-6">{OP_GLYPH.INS} INS feeds → resolve</p>
       </div>
     </div>
   );
@@ -3908,49 +3911,13 @@ function ProxySettings() {
 //  APP ROOT
 // ═══════════════════════════════════════════════════════════════════════════
 
-const TAB_STORAGE_KEY = 'brrst:lastTab';
-const TAB_KV_KEY = 'ui.lastTab';
-const VALID_TABS = new Set(['news', 'pods', 'saved', 'queue']);
-
 function App() {
-  // Sync fast-path via localStorage; some PWA storage backends (notably iOS
-  // standalone) can evict localStorage, so we also persist via IDB below
-  // and fall back to it when localStorage is empty.
-  const initialTabFromLS = (() => {
-    try {
-      const saved = localStorage.getItem(TAB_STORAGE_KEY);
-      if (saved && VALID_TABS.has(saved)) return saved;
-    } catch (_) {}
-    return null;
-  })();
-  const [tab, setTab] = useState(initialTabFromLS || 'news');
   const [drawer, setDrawer] = useState(false);
   const [booted, setBooted] = useState(false);
-  const tabHydrated = useRef(false);
-  const hadLSTab = useRef(initialTabFromLS !== null);
-
-  // Persist tab changes to both stores; skip until IDB hydration has happened
-  // so we don't clobber the saved IDB value with the default before reading.
-  useEffect(() => {
-    try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch (_) {}
-    if (tabHydrated.current) {
-      IDB.setKv(TAB_KV_KEY, tab).catch(() => {});
-    }
-  }, [tab]);
 
   useEffect(() => {
     (async () => {
       await IDB.open();
-      // Restore last tab before we render AppInner; the boot screen masks
-      // this. localStorage takes precedence when it had a value, since it's
-      // the most recently-written sync store. Otherwise fall back to IDB.
-      try {
-        if (!hadLSTab.current) {
-          const savedTab = await IDB.getKv(TAB_KV_KEY);
-          if (savedTab && VALID_TABS.has(savedTab)) setTab(savedTab);
-        }
-      } catch (_) {}
-      tabHydrated.current = true;
       await store.hydrate();
       const ok = await Matrix.restore();
       if (ok) {
@@ -3984,16 +3951,13 @@ function App() {
   return (
     <StoreCtx.Provider value={store}>
       <PlayerProvider>
-        <AppInner
-          tab={tab} setTab={setTab}
-          drawer={drawer} setDrawer={setDrawer}
-        />
+        <AppInner drawer={drawer} setDrawer={setDrawer} />
       </PlayerProvider>
     </StoreCtx.Provider>
   );
 }
 
-function AppInner({ tab, setTab, drawer, setDrawer }) {
+function AppInner({ drawer, setDrawer }) {
   const player = usePlayer();
   const state  = useStoreState();
   const [openFeedId, setOpenFeedId] = useState(null);
@@ -4001,9 +3965,8 @@ function AppInner({ tab, setTab, drawer, setDrawer }) {
 
   const handleSubscribe = async (url) => {
     const feed = await actionSubscribe(url);
-    // jump to the new feed
     if (feed?.id) {
-      setTab(feed.kind === 'podcast' ? 'pods' : 'news');
+      setOpenItemId(null);
       setOpenFeedId(feed.id);
     }
     return feed;
@@ -4014,22 +3977,13 @@ function AppInner({ tab, setTab, drawer, setDrawer }) {
     if (action.type === 'feed') {
       const f = state.feeds[action.id];
       if (!f) return;
-      const goTab = f.kind === 'podcast' ? 'pods' : 'news';
-      setTab(goTab);
-      setOpenFeedId(action.id);
       setOpenItemId(null);
+      setOpenFeedId(action.id);
     } else if (action.type === 'item') {
       const it = state.items[action.id];
       if (!it) return;
-      const f = state.feeds[it.feedId];
-      if (f?.kind === 'podcast') {
-        // play it directly
-        player.playItem(it).catch(() => {});
-        setTab('pods');
-      } else {
-        setTab('news');
-        setOpenItemId(action.id);
-      }
+      setOpenFeedId(null);
+      setOpenItemId(action.id);
     } else if (action.type === 'play') {
       const it = state.items[action.id];
       if (it?.audio) player.playItem(it).catch(() => {});
@@ -4038,13 +3992,13 @@ function AppInner({ tab, setTab, drawer, setDrawer }) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Masthead tab={tab} setTab={setTab} onMenu={() => setDrawer(true)} />
-      <SubscribeBar tab={tab} onSubscribe={handleSubscribe} onNavigate={navigate} />
+      <Masthead onMenu={() => setDrawer(true)} />
+      <SubscribeBar tab="pods" onSubscribe={handleSubscribe} onNavigate={navigate} />
       <main className="flex-1 pb-32">
-        {tab === 'news'  && <NewsView openItemId={openItemId} setOpenItemId={setOpenItemId} openFeedId={openFeedId} setOpenFeedId={setOpenFeedId} />}
-        {tab === 'pods'  && <PodsView openFeedId={openFeedId} setOpenFeedId={setOpenFeedId} />}
-        {tab === 'saved' && <SavedView />}
-        {tab === 'queue' && <QueueView />}
+        <PodsView
+          openFeedId={openFeedId} setOpenFeedId={setOpenFeedId}
+          openItemId={openItemId} setOpenItemId={setOpenItemId}
+        />
       </main>
       <PlayerBar />
       <Drawer open={drawer} onClose={() => setDrawer(false)} />
