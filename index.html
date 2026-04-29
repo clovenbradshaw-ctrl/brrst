@@ -2830,10 +2830,16 @@ function useSort(viewKey, defaultValue = 'newest') {
   const [sort, setSort] = useState(defaultValue);
   useEffect(() => {
     IDB.getKv(`sort.${viewKey}`).then(v => { if (v) setSort(v); }).catch(() => {});
+    // Keep multiple useSort instances on the same key in sync, so a picker in
+    // the settings drawer updates the strip mounted underneath it.
+    const handler = (e) => { if (e.detail?.key === viewKey) setSort(e.detail.value); };
+    window.addEventListener('brrst:sort-change', handler);
+    return () => window.removeEventListener('brrst:sort-change', handler);
   }, [viewKey]);
   const update = useCallback((v) => {
     setSort(v);
     IDB.setKv(`sort.${viewKey}`, v).catch(() => {});
+    window.dispatchEvent(new CustomEvent('brrst:sort-change', { detail: { key: viewKey, value: v } }));
   }, [viewKey]);
   return [sort, update];
 }
@@ -2899,6 +2905,50 @@ const FEED_SORT_OPTS = [
   { k: 'unplayed', label: 'unplayed first' },
   { k: 'duration', label: 'longest first' },
 ];
+
+// Sort options for the subscribed-show strip on the pods view. Operates over
+// feeds, with derived per-feed signals from items + plays.
+const SHOW_SORT_OPTS = [
+  { k: 'recent_added',   label: 'recently added' },
+  { k: 'recent_episode', label: 'newest episode' },
+  { k: 'last_listened',  label: 'last listened' },
+  { k: 'unplayed',       label: 'unplayed first' },
+  { k: 'alpha',          label: 'a → z' },
+];
+
+function applyShowSort(feeds, sort, items, plays) {
+  const arr = feeds.slice();
+  if (sort === 'alpha') {
+    return arr.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  }
+  if (sort === 'recent_added' || !sort) {
+    return arr.sort((a, b) => (b.addedTs || 0) - (a.addedTs || 0));
+  }
+  // Aggregate per-feed signals in one pass over items.
+  const agg = {};
+  for (const it of Object.values(items || {})) {
+    const f = agg[it.feedId] || (agg[it.feedId] = { newestPub: 0, lastListen: 0, unplayed: 0 });
+    if ((it.pubTs || 0) > f.newestPub) f.newestPub = it.pubTs || 0;
+    const p = plays?.[it.id];
+    if (p?.lastTs && p.lastTs > f.lastListen) f.lastListen = p.lastTs;
+    if (it.audio && !(p?.played)) f.unplayed += 1;
+  }
+  const tiebreak = (a, b) => (b.addedTs || 0) - (a.addedTs || 0);
+  if (sort === 'recent_episode') {
+    return arr.sort((a, b) => (((agg[b.id]?.newestPub) || 0) - ((agg[a.id]?.newestPub) || 0)) || tiebreak(a, b));
+  }
+  if (sort === 'last_listened') {
+    return arr.sort((a, b) => (((agg[b.id]?.lastListen) || 0) - ((agg[a.id]?.lastListen) || 0)) || tiebreak(a, b));
+  }
+  if (sort === 'unplayed') {
+    return arr.sort((a, b) => {
+      const d = ((agg[b.id]?.unplayed) || 0) - ((agg[a.id]?.unplayed) || 0);
+      if (d) return d;
+      return (((agg[b.id]?.newestPub) || 0) - ((agg[a.id]?.newestPub) || 0)) || tiebreak(a, b);
+    });
+  }
+  return arr.sort(tiebreak);
+}
 
 // Thumbnail card for a subscribed feed. Tapping the image opens the profile;
 // the corner ⋯ button opens an action menu (move/delete) so the user can
@@ -3145,12 +3195,12 @@ function PodsView({ openFeedId, setOpenFeedId, openItemId, setOpenItemId, onAddS
   const openFeed = openFeedId ? state.feeds[openFeedId] : null;
   const openItem = openItemId ? state.items[openItemId] : null;
   const [sort, setSort] = useSort('pods.latest', 'newest');
+  const [showSort] = useSort('pods.shows', 'recent_added');
 
   const podcastFeeds = useMemo(() => {
-    return Object.values(state.feeds)
-      .filter(f => f.kind === 'podcast')
-      .sort((a, b) => (b.addedTs || 0) - (a.addedTs || 0));
-  }, [state.feeds]);
+    const onlyPods = Object.values(state.feeds).filter(f => f.kind === 'podcast');
+    return applyShowSort(onlyPods, showSort, state.items, state.plays);
+  }, [state.feeds, state.items, state.plays, showSort]);
 
   // recent episodes across all subs
   const recentEps = useMemo(() => {
@@ -3715,6 +3765,9 @@ function Drawer({ open, onClose }) {
           {/* Subscriptions: refresh, export, import */}
           <SubscriptionsPanel />
 
+          {/* Pods strip sort */}
+          <ShowSortPanel />
+
           {/* EO log toggle */}
           <section>
             <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss mb-2">debug</div>
@@ -3788,6 +3841,24 @@ function UpdatePanel() {
         Drops the cached app shell and re-downloads brrst from {location.host || 'origin'}. Use this when a new version has shipped but the PWA is still serving an old build.
       </p>
       {err && <div className="text-[11px] text-red-400 mt-2">{err}</div>}
+    </section>
+  );
+}
+
+function ShowSortPanel() {
+  const [sort, setSort] = useSort('pods.shows', 'recent_added');
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss">podcasts</div>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[12px] text-paper/75 leading-snug">Sort show icons</div>
+        <SortPicker value={sort} onChange={setSort} options={SHOW_SORT_OPTS} />
+      </div>
+      <p className="text-[11px] text-mute mt-2 leading-relaxed">
+        Order of the cover strip on the podcasts tab. Applies everywhere the strip appears.
+      </p>
     </section>
   );
 }
