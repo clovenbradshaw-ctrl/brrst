@@ -4248,6 +4248,9 @@ function App() {
         await store.dispatch(OP.NUL, 'brrst', { greeting: 'genesis' });
       }
       setBooted(true);
+      // resync all subscribed feeds in the background so the app shows
+      // the freshest items without blocking initial render
+      actionRefreshAll().catch((e) => console.warn('launch refresh failed', e));
     })();
   }, []);
 
