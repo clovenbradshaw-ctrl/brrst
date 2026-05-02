@@ -1931,6 +1931,7 @@ const Icon = ({ name, size = 18, className = '', stroke = 1.6 }) => {
     case 'skip-bwd': return <svg {...props}><polygon points="19 4 9 12 19 20 19 4" /><line x1="5" y1="5" x2="5" y2="19" /></svg>;
     case 'fwd-30':   return <svg {...props}><path d="M21 12a9 9 0 1 1-3.55-7.16"/><polyline points="21 4 21 10 15 10"/></svg>;
     case 'bwd-15':   return <svg {...props}><path d="M3 12a9 9 0 1 0 3.55-7.16"/><polyline points="3 4 3 10 9 10"/></svg>;
+    case 'moon':     return <svg {...props}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>;
     case 'plus':     return <svg {...props}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
     case 'x':        return <svg {...props}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
     case 'check':    return <svg {...props}><polyline points="20 6 9 17 4 12" /></svg>;
@@ -1974,6 +1975,11 @@ function PlayerProvider({ children }) {
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rate, setRate] = useState(1);
+  // Sleep timer: pause playback either after `sleepEndsAt` ms-since-epoch is
+  // reached, or when the current episode ends (whichever the user picked).
+  const [sleepEndsAt, setSleepEndsAt] = useState(null);
+  const [sleepUntilEndOfEpisode, setSleepUntilEndOfEpisode] = useState(false);
+  const [sleepRemainingSec, setSleepRemainingSec] = useState(0);
 
   // ensure audio element exists
   useEffect(() => {
@@ -2197,8 +2203,56 @@ function PlayerProvider({ children }) {
     } catch {}
   }, [playing, position, duration, rate]);
 
+  // Sleep timer countdown: pause once the deadline passes. Wall-clock based
+  // so backgrounding the tab doesn't lose time.
+  useEffect(() => {
+    if (!sleepEndsAt) { setSleepRemainingSec(0); return; }
+    const tick = () => {
+      const remainMs = sleepEndsAt - Date.now();
+      if (remainMs <= 0) {
+        try { audioRef.current?.pause(); } catch {}
+        setSleepEndsAt(null);
+        setSleepRemainingSec(0);
+      } else {
+        setSleepRemainingSec(Math.ceil(remainMs / 1000));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [sleepEndsAt]);
+
+  // End-of-episode sleep: clear the flag once the episode finishes (the
+  // 'ended' event already pauses the audio element).
+  useEffect(() => {
+    if (!sleepUntilEndOfEpisode) return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onEnd = () => setSleepUntilEndOfEpisode(false);
+    audio.addEventListener('ended', onEnd);
+    return () => audio.removeEventListener('ended', onEnd);
+  }, [sleepUntilEndOfEpisode]);
+
+  const sleep = useMemo(() => ({
+    endsAt: sleepEndsAt,
+    untilEndOfEpisode: sleepUntilEndOfEpisode,
+    remainingSec: sleepRemainingSec,
+    setMinutes: (minutes) => {
+      setSleepUntilEndOfEpisode(false);
+      setSleepEndsAt(Date.now() + minutes * 60000);
+    },
+    setEndOfEpisode: () => {
+      setSleepEndsAt(null);
+      setSleepUntilEndOfEpisode(true);
+    },
+    cancel: () => {
+      setSleepEndsAt(null);
+      setSleepUntilEndOfEpisode(false);
+    },
+  }), [sleepEndsAt, sleepUntilEndOfEpisode, sleepRemainingSec]);
+
   return (
-    <PlayerCtx.Provider value={{ playing, position, duration, rate, playItem, toggle, seek, seekTo, setSpeed, restart }}>
+    <PlayerCtx.Provider value={{ playing, position, duration, rate, playItem, toggle, seek, seekTo, setSpeed, restart, sleep }}>
       {children}
     </PlayerCtx.Provider>
   );
@@ -3550,6 +3604,74 @@ function QueueView() {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────
+//  SLEEP TIMER  ▌ pop-over preset durations + end-of-episode
+// ─────────────────────────────────────────────────────────────────────────
+
+const SLEEP_PRESETS_MIN = [5, 10, 15, 30, 45, 60];
+
+function fmtSleepRemaining(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function SleepTimerControl({ sleep }) {
+  const [open, setOpen] = useState(false);
+  const active = !!(sleep.endsAt || sleep.untilEndOfEpisode);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`tap flex items-center gap-1.5 ${active ? 'text-moss' : 'text-mute hover:text-paper'}`}
+        aria-label="Sleep timer"
+      >
+        <Icon name="moon" size={16} />
+        {sleep.endsAt && (
+          <span className="eo text-[10px] tabular-nums">{fmtSleepRemaining(sleep.remainingSec)}</span>
+        )}
+        {sleep.untilEndOfEpisode && !sleep.endsAt && (
+          <span className="eo text-[9px] uppercase tracking-[0.12em]">eoe</span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full right-0 mb-2 z-40 ink2 border border-paper/15 rounded-lg p-2 min-w-[200px] shadow-xl">
+            <div className="eo text-[9px] uppercase tracking-[0.18em] text-mute px-2 pt-1 pb-2">sleep timer</div>
+            <div className="grid grid-cols-3 gap-1 mb-1">
+              {SLEEP_PRESETS_MIN.map(m => (
+                <button
+                  key={m}
+                  onClick={() => { sleep.setMinutes(m); setOpen(false); }}
+                  className="eo text-[10px] uppercase tracking-[0.12em] px-2 py-1.5 rounded text-paper hover:bg-paper/10 tap"
+                >
+                  {m < 60 ? `${m}m` : `${m / 60}h`}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => { sleep.setEndOfEpisode(); setOpen(false); }}
+              className={`w-full eo text-[10px] uppercase tracking-[0.12em] px-2 py-1.5 rounded text-left tap ${sleep.untilEndOfEpisode ? 'bg-moss/15 text-moss' : 'text-paper hover:bg-paper/10'}`}
+            >
+              end of episode
+            </button>
+            {active && (
+              <button
+                onClick={() => { sleep.cancel(); setOpen(false); }}
+                className="w-full eo text-[10px] uppercase tracking-[0.12em] px-2 py-1.5 rounded text-left text-rust hover:bg-paper/10 tap mt-1"
+              >
+                cancel
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  PLAYER BAR  ▌ sticky bottom now-playing bar
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3643,6 +3765,7 @@ function PlayerBar() {
               ))}
             </div>
             <div className="flex items-center gap-3">
+              <SleepTimerControl sleep={player.sleep} />
               <button onClick={() => actionTogglePlayed(item.id)} className={`tap ${state.plays[item.id]?.played ? 'text-sage' : 'text-mute hover:text-paper'}`}>
                 <Icon name="check" size={16} />
               </button>
