@@ -3423,26 +3423,78 @@ function EpisodeView({ item, onClose }) {
         )}
 
         <div className="mb-12">
-          <div className="flex justify-center">
-            <button
-              onClick={() => isCurrent ? player.toggle() : player.playItem(item)}
-              disabled={!item.audio}
-              className={`flex items-center gap-3 px-8 py-3.5 rounded-full eo text-[12px] uppercase tracking-[0.2em] tap transition-colors disabled:opacity-40 ${isCurrent && player.playing ? 'bg-moss text-ink shadow-lg shadow-moss/25' : 'border-2 border-moss text-moss hover:bg-moss/10'}`}
-            >
-              <Icon name={isCurrent && player.playing ? 'pause' : 'play'} size={14} />
-              {ctaLabel}
-            </button>
-          </div>
-          {pct > 0 && pct < 100 && (
-            <div className="mt-6 max-w-md mx-auto">
-              <div className="h-[3px] bg-paper/10 rounded-full overflow-hidden">
-                <div className="h-full bg-moss rounded-full" style={{ width: `${pct}%` }} />
+          {isCurrent ? (
+            <div className="max-w-md mx-auto">
+              <div className="mb-1">
+                <input
+                  type="range"
+                  className="seek"
+                  min="0"
+                  max={dur || 0}
+                  value={player.position || 0}
+                  onChange={(e) => player.seekTo(parseFloat(e.target.value))}
+                />
               </div>
-              <div className="flex justify-between eo text-[10px] text-mute tabular-nums mt-2">
-                <span>{fmtTime(pos)}</span>
-                <span>−{fmtTime(Math.max(0, dur - pos))}</span>
+              <div className="flex justify-between eo text-[10px] text-mute tabular-nums mb-5">
+                <span>{fmtTime(player.position)}</span>
+                <span>−{fmtTime(Math.max(0, dur - player.position))}</span>
+              </div>
+
+              <div className="flex items-center justify-center gap-6 mb-4">
+                <button onClick={() => player.seek(-15)} className="text-paper hover:text-moss tap relative">
+                  <Icon name="bwd-15" size={26} />
+                  <span className="absolute inset-0 flex items-center justify-center eo text-[8px] mt-1">15</span>
+                </button>
+                <button onClick={() => player.toggle()} className="w-16 h-16 rounded-full bg-moss text-ink flex items-center justify-center tap shadow-xl shadow-moss/25 hover:scale-105 transition-transform">
+                  <Icon name={player.playing ? 'pause' : 'play'} size={22} />
+                </button>
+                <button onClick={() => player.seek(30)} className="text-paper hover:text-moss tap relative">
+                  <Icon name="fwd-30" size={26} />
+                  <span className="absolute inset-0 flex items-center justify-center eo text-[8px] mt-1">30</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {[1, 1.25, 1.5, 1.75, 2].map(r => (
+                    <button key={r} onClick={() => player.setSpeed(r)}
+                      className={`eo text-[10px] px-1.5 py-0.5 ${player.rate === r ? 'text-moss border-b border-moss' : 'text-mute hover:text-paper'} tap`}>
+                      {r}×
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <SleepTimerControl sleep={player.sleep} />
+                  <button onClick={() => actionTogglePlayed(item.id)} className={`tap ${play?.played ? 'text-sage' : 'text-mute hover:text-paper'}`}>
+                    <Icon name="check" size={16} />
+                  </button>
+                </div>
               </div>
             </div>
+          ) : (
+            <>
+              <div className="flex justify-center">
+                <button
+                  onClick={() => player.playItem(item)}
+                  disabled={!item.audio}
+                  className="flex items-center gap-3 px-8 py-3.5 rounded-full eo text-[12px] uppercase tracking-[0.2em] tap transition-colors disabled:opacity-40 border-2 border-moss text-moss hover:bg-moss/10"
+                >
+                  <Icon name="play" size={14} />
+                  {ctaLabel}
+                </button>
+              </div>
+              {pct > 0 && pct < 100 && (
+                <div className="mt-6 max-w-md mx-auto">
+                  <div className="h-[3px] bg-paper/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-moss rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="flex justify-between eo text-[10px] text-mute tabular-nums mt-2">
+                    <span>{fmtTime(pos)}</span>
+                    <span>−{fmtTime(Math.max(0, dur - pos))}</span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
           {play?.played && (
             <div className="mt-5 text-center eo text-[10px] uppercase tracking-[0.18em] text-sage">✓ played</div>
@@ -3676,13 +3728,14 @@ function SleepTimerControl({ sleep }) {
 //  PLAYER BAR  ▌ sticky bottom now-playing bar
 // ═══════════════════════════════════════════════════════════════════════════
 
-function PlayerBar() {
+function PlayerBar({ viewingNowPlaying }) {
   const state = useStoreState();
   const player = usePlayer();
   const [expanded, setExpanded] = useState(false);
 
   const item = state.nowPlaying ? state.items[state.nowPlaying] : null;
   if (!item) return null;
+  if (viewingNowPlaying) return null;
 
   const dur = player.duration || item.duration || 0;
   const pct = dur > 0 ? (player.position / dur) * 100 : 0;
@@ -4454,7 +4507,7 @@ function AppInner({ drawer, setDrawer }) {
           onAddShow={focusSubscribe}
         />
       </main>
-      <PlayerBar />
+      <PlayerBar viewingNowPlaying={openItemId != null && openItemId === state.nowPlaying} />
       <Drawer open={drawer} onClose={() => setDrawer(false)} />
     </div>
   );
