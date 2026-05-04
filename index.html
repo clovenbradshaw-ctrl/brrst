@@ -306,7 +306,11 @@ const CONFIG = {
 
   // ─── local store ───
   IDB_NAME: 'brrst',
-  IDB_VERSION: 1,
+  IDB_VERSION: 2,
+
+  // ─── episode downloads ───
+  // How long a downloaded episode blob stays on-device before eviction.
+  DOWNLOAD_TTL_MS: 7 * 24 * 60 * 60 * 1000,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -423,6 +427,12 @@ const IDB = (() => {
         // misc kv (auth, settings)
         if (!db.objectStoreNames.contains('kv')) {
           db.createObjectStore('kv', { keyPath: 'k' });
+        }
+        // episode downloads — stored as Blobs with a download timestamp.
+        // Entries are evicted after CONFIG.DOWNLOAD_TTL_MS (7 days).
+        if (!db.objectStoreNames.contains('downloads')) {
+          const d = db.createObjectStore('downloads', { keyPath: 'id' });
+          d.createIndex('byTs', 'ts');
         }
       };
       req.onsuccess = () => { _db = req.result; resolve(_db); };
@@ -561,6 +571,27 @@ const IDB = (() => {
       });
     },
     setKv: (k, v) => tx(['kv'], 'readwrite', t => t.objectStore('kv').put({ k, v })),
+    // downloads
+    putDownload: (rec) => tx(['downloads'], 'readwrite', t => t.objectStore('downloads').put(rec)),
+    deleteDownload: (id) => tx(['downloads'], 'readwrite', t => t.objectStore('downloads').delete(id)),
+    getDownload: async (id) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['downloads'], 'readonly');
+        const req = t.objectStore('downloads').get(id);
+        req.onsuccess = () => res(req.result || null);
+        req.onerror = () => rej(req.error);
+      });
+    },
+    getAllDownloads: async () => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(['downloads'], 'readonly');
+        const req = t.objectStore('downloads').getAll();
+        req.onsuccess = () => res(req.result || []);
+        req.onerror = () => rej(req.error);
+      });
+    },
   };
 })();
 
@@ -1919,6 +1950,133 @@ async function actionEnqueue(itemId, remove = false) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  DOWNLOADS  ▌ offline episode cache with 7-day TTL
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  Downloaded audio is stored as a Blob in IDB keyed by item.id, with the
+//  download timestamp. The TTL is enforced two ways:
+//    1. cleanupExpired() runs on app start (and on each getBlob lookup)
+//    2. the metadata index exposes expiresAt so the UI can show days-left
+//
+//  Downloads are not synced through Matrix — the binary lives only on the
+//  device that fetched it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const Downloads = (() => {
+  const listeners = new Set();
+  // metadata-only index for cheap UI subscription (no Blobs)
+  let index = {};       // id → { ts, size, mime, expiresAt }
+  // currently in-flight downloads, id → { progress 0..1 }
+  let inflight = {};
+
+  function snapshot() { return { index, inflight }; }
+  function emit() {
+    const snap = snapshot();
+    for (const fn of listeners) fn(snap);
+  }
+
+  async function refreshIndex() {
+    const all = await IDB.getAllDownloads().catch(() => []);
+    const next = {};
+    for (const rec of all) {
+      next[rec.id] = {
+        ts: rec.ts,
+        size: rec.size,
+        mime: rec.mime,
+        expiresAt: rec.ts + CONFIG.DOWNLOAD_TTL_MS,
+      };
+    }
+    index = next;
+    emit();
+  }
+
+  async function cleanupExpired() {
+    const all = await IDB.getAllDownloads().catch(() => []);
+    const now = _now();
+    let removed = 0;
+    for (const rec of all) {
+      if ((now - rec.ts) > CONFIG.DOWNLOAD_TTL_MS) {
+        try { await IDB.deleteDownload(rec.id); removed += 1; } catch {}
+      }
+    }
+    if (removed) await refreshIndex();
+    return removed;
+  }
+
+  async function startDownload(item) {
+    if (!item?.id) throw new Error('missing item id');
+    if (!item?.audio) throw new Error('no audio for this item');
+    if (inflight[item.id] || index[item.id]) return;
+
+    inflight = { ...inflight, [item.id]: { progress: 0 } };
+    emit();
+
+    try {
+      const res = await fetch(item.audio);
+      if (!res.ok) throw new Error(`http ${res.status}`);
+      const total = Number(res.headers.get('content-length')) || 0;
+      const chunks = [];
+      const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+      let received = 0;
+      if (reader) {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.byteLength;
+          if (total > 0) {
+            inflight = { ...inflight, [item.id]: { progress: Math.min(0.999, received / total) } };
+            emit();
+          }
+        }
+      } else {
+        const buf = new Uint8Array(await res.arrayBuffer());
+        chunks.push(buf);
+        received = buf.byteLength;
+      }
+      const mime = res.headers.get('content-type') || item.audioType || 'audio/mpeg';
+      const blob = new Blob(chunks, { type: mime });
+      const rec = { id: item.id, url: item.audio, blob, mime, size: blob.size, ts: _now() };
+      await IDB.putDownload(rec);
+    } finally {
+      const { [item.id]: _gone, ...rest } = inflight;
+      inflight = rest;
+      await refreshIndex();
+    }
+  }
+
+  async function remove(id) {
+    await IDB.deleteDownload(id).catch(() => {});
+    await refreshIndex();
+  }
+
+  // Returns the cached Blob if still fresh; evicts and returns null if expired.
+  async function getBlob(id) {
+    const rec = await IDB.getDownload(id).catch(() => null);
+    if (!rec) return null;
+    if ((_now() - rec.ts) > CONFIG.DOWNLOAD_TTL_MS) {
+      await remove(id);
+      return null;
+    }
+    return rec.blob;
+  }
+
+  function subscribe(fn) {
+    listeners.add(fn);
+    fn(snapshot());
+    return () => listeners.delete(fn);
+  }
+
+  return { startDownload, remove, getBlob, refreshIndex, cleanupExpired, subscribe, snapshot };
+})();
+
+function useDownloads() {
+  const [snap, setSnap] = useState(() => Downloads.snapshot());
+  useEffect(() => Downloads.subscribe(setSnap), []);
+  return snap;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  ICONS  ▌ inline SVG, no dependencies
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1971,6 +2129,7 @@ function PlayerProvider({ children }) {
   const audioRef = useRef(null);
   const playTokenRef = useRef(0);     // supersedes in-flight loads when switching items
   const pendingSeekRef = useRef(null); // applied once metadata loads (iOS can't seek before)
+  const blobUrlRef = useRef(null);     // tracks the current blob: URL so we can revoke it
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -2057,16 +2216,42 @@ function PlayerProvider({ children }) {
     const finished = item.duration > 0 && saved >= item.duration - 5;
     const startAt = (opts.restart || finished) ? 0 : saved;
 
-    let absUrl = item.audio;
-    try { absUrl = new URL(item.audio, location.href).href; } catch {}
+    // Prefer a cached download (offline-first), fall back to the network URL.
+    // Note: when the saved blob is stale, getBlob evicts it and returns null.
+    let srcUrl = item.audio;
+    let nextBlobUrl = null;
+    try {
+      const cached = await Downloads.getBlob(item.id);
+      if (cached) {
+        nextBlobUrl = URL.createObjectURL(cached);
+        srcUrl = nextBlobUrl;
+      }
+    } catch (e) { console.warn('download lookup failed', e); }
+
+    if (token !== playTokenRef.current) {
+      // a newer playItem call superseded us — bail without touching the audio
+      if (nextBlobUrl) URL.revokeObjectURL(nextBlobUrl);
+      return;
+    }
+
+    let absUrl = srcUrl;
+    try { absUrl = new URL(srcUrl, location.href).href; } catch {}
     const sameSource = audio.src === absUrl || audio.currentSrc === absUrl;
 
     if (!sameSource) {
-      audio.src = item.audio;
+      // releasing the previous blob URL (if any) prevents slow IDB-blob leaks
+      if (blobUrlRef.current && blobUrlRef.current !== nextBlobUrl) {
+        URL.revokeObjectURL(blobUrlRef.current);
+      }
+      blobUrlRef.current = nextBlobUrl;
+      audio.src = srcUrl;
       // Kick off buffering immediately. Without this, iOS PWA waits for the
       // play() call before initiating the network request, which is the main
       // contributor to "slow audio start" in standalone mode.
       try { audio.load(); } catch {}
+    } else if (nextBlobUrl) {
+      // we created a blob URL but didn't end up needing it
+      URL.revokeObjectURL(nextBlobUrl);
     }
     audio.playbackRate = rate;
 
@@ -3317,6 +3502,101 @@ function PodsView({ openFeedId, setOpenFeedId, openItemId, setOpenItemId, onAddS
   );
 }
 
+// DownloadButton — toggles cached / not-cached for an episode's audio.
+// Three visual states: idle (cloud-style download icon), in-flight (percent),
+// downloaded (filled check + days-left tooltip). Tapping a downloaded item
+// asks for confirmation before evicting.
+function DownloadButton({ item, size = 14, className = '' }) {
+  const dl = useDownloads();
+  if (!item?.audio) return null;
+  const meta = dl.index[item.id];
+  const inflight = dl.inflight[item.id];
+  const downloading = !!inflight;
+
+  const onClick = (e) => {
+    e.stopPropagation();
+    if (downloading) return;
+    if (meta) {
+      if (confirm('Remove this downloaded episode?')) {
+        Downloads.remove(item.id).catch(err => console.warn('remove failed', err));
+      }
+      return;
+    }
+    Downloads.startDownload(item).catch(err => {
+      console.warn('download failed', err);
+      alert(`Download failed: ${err.message || err}\n\nThe podcast host may not allow direct downloads.`);
+    });
+  };
+
+  if (downloading) {
+    const pct = Math.round((inflight.progress || 0) * 100);
+    return (
+      <button disabled className={`tap text-moss eo text-[10px] tabular-nums ${className}`} title="Downloading…">
+        {pct > 0 ? `${pct}%` : '…'}
+      </button>
+    );
+  }
+
+  if (meta) {
+    const daysLeft = Math.max(0, Math.ceil((meta.expiresAt - Date.now()) / (24 * 3600 * 1000)));
+    return (
+      <button
+        onClick={onClick}
+        title={`Downloaded · ${daysLeft} day${daysLeft === 1 ? '' : 's'} left · tap to remove`}
+        className={`tap text-moss hover:text-rust ${className}`}
+      >
+        <Icon name="download" size={size} stroke={2.4} />
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      title="Download for offline playback (kept 7 days)"
+      className={`tap text-mute hover:text-paper ${className}`}
+    >
+      <Icon name="download" size={size} />
+    </button>
+  );
+}
+
+// DownloadStatus — verbose footer shown on the EpisodeView. Mirrors the row
+// button but adds a progress bar while in-flight and the days-remaining text
+// once cached. Returns null in the idle state so the EpisodeView only grows
+// height when there's something to say.
+function DownloadStatus({ item }) {
+  const dl = useDownloads();
+  const meta = dl.index[item.id];
+  const inflight = dl.inflight[item.id];
+
+  if (inflight) {
+    const pct = Math.round((inflight.progress || 0) * 100);
+    return (
+      <div className="mt-5 max-w-md mx-auto">
+        <div className="eo text-[10px] uppercase tracking-[0.18em] text-moss text-center mb-2">
+          downloading · {pct > 0 ? `${pct}%` : 'starting…'}
+        </div>
+        <div className="h-[3px] bg-paper/10 rounded-full overflow-hidden">
+          <div className="h-full bg-moss rounded-full transition-[width]" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (meta) {
+    const daysLeft = Math.max(0, Math.ceil((meta.expiresAt - Date.now()) / (24 * 3600 * 1000)));
+    const sizeMb = meta.size ? (meta.size / (1024 * 1024)).toFixed(1) : null;
+    return (
+      <div className="mt-5 text-center eo text-[10px] uppercase tracking-[0.18em] text-moss">
+        ↓ downloaded{sizeMb ? ` · ${sizeMb} MB` : ''} · {daysLeft} day{daysLeft === 1 ? '' : 's'} left
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function EpisodeRow({ item, hideShow = false, onOpen }) {
   const player = usePlayer();
   const state = useStoreState();
@@ -3354,13 +3634,14 @@ function EpisodeRow({ item, hideShow = false, onOpen }) {
           >
             <Icon name={isCurrent && player.playing ? 'pause' : 'play'} size={16} />
           </button>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <button onClick={() => actionSave(item.id, !!state.saved[item.id])} className={`tap ${state.saved[item.id] ? 'text-rust' : 'text-mute hover:text-paper'}`}>
               <Icon name={state.saved[item.id] ? 'bookmark-fill' : 'bookmark'} size={14} />
             </button>
             <button onClick={() => actionEnqueue(item.id, state.queue.includes(item.id))} className={`tap ${state.queue.includes(item.id) ? 'text-moss' : 'text-mute hover:text-paper'}`}>
               <Icon name="queue" size={14} />
             </button>
+            <DownloadButton item={item} size={14} />
           </div>
         </div>
       </div>
@@ -3400,6 +3681,7 @@ function EpisodeView({ item, onClose }) {
           <button onClick={() => actionEnqueue(item.id, isQueued)} className={`tap ${isQueued ? 'text-moss' : 'text-paper/60 hover:text-paper'}`}>
             <Icon name="queue" size={18} />
           </button>
+          {item.audio && <DownloadButton item={item} size={18} />}
           {item.link && (
             <a href={item.link} target="_blank" rel="noopener" className="text-paper/60 hover:text-moss2 tap">
               <Icon name="external" size={18} />
@@ -3502,6 +3784,7 @@ function EpisodeView({ item, onClose }) {
           {!item.audio && (
             <div className="mt-5 text-center eo text-[10px] uppercase tracking-[0.18em] text-mute2">no audio in this item</div>
           )}
+          {item.audio && <DownloadStatus item={item} />}
         </div>
 
         {(item.descHtml || item.desc) && (
@@ -4423,11 +4706,22 @@ function App() {
       if ((await IDB.maxSeq()) === 0) {
         await store.dispatch(OP.NUL, 'brrst', { greeting: 'genesis' });
       }
+      // Evict downloads older than the TTL, then prime the in-memory index
+      // so DownloadButton / DownloadStatus can render synchronously.
+      await Downloads.cleanupExpired().catch((e) => console.warn('download cleanup failed', e));
+      await Downloads.refreshIndex().catch(() => {});
       setBooted(true);
       // resync all subscribed feeds in the background so the app shows
       // the freshest items without blocking initial render
       actionRefreshAll().catch((e) => console.warn('launch refresh failed', e));
     })();
+
+    // Re-check expiry once an hour while the tab is open. Downloads pinned at
+    // exactly day-7 wouldn't otherwise expire until the next reload.
+    const id = setInterval(() => {
+      Downloads.cleanupExpired().catch(() => {});
+    }, 60 * 60 * 1000);
+    return () => clearInterval(id);
   }, []);
 
   if (!booted) {
@@ -4521,7 +4815,7 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
 
 // expose for console debugging
-window.brrst = { store, IDB, Matrix, OP, OP_GLYPH, makeEvent, fold, replay, fetchFeed, parseFeed };
+window.brrst = { store, IDB, Matrix, Downloads, OP, OP_GLYPH, makeEvent, fold, replay, fetchFeed, parseFeed };
 
 </script>
 
