@@ -161,6 +161,57 @@
     border: none;
   }
 
+  /* libby-style circular tan controls */
+  .libby-circle {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: rgba(201, 169, 107, 0.10);
+    border: 2px solid rgba(201, 169, 107, 0.55);
+    color: var(--ochre);
+    position: relative;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .libby-circle:hover { background: rgba(201, 169, 107, 0.18); }
+  .libby-circle.primary {
+    width: 76px; height: 76px;
+    background: var(--ochre);
+    color: var(--ink);
+    box-shadow: 0 10px 28px rgba(201, 169, 107, 0.30);
+    border-color: transparent;
+  }
+  .libby-circle.primary:hover { background: var(--ochre); transform: scale(1.04); }
+  .libby-circle:active { transform: scale(0.96); }
+
+  /* night mode (oled-true-black) */
+  html.night {
+    --ink:    #000000;
+    --ink2:   #07090a;
+    --ink3:   #0f1310;
+    --paper:  #d8d2c0;
+  }
+
+  /* libby scrub strip — horizontal draggable timeline */
+  .scrub-strip {
+    position: relative;
+    width: 100%;
+    height: 56px;
+    cursor: ew-resize;
+    user-select: none;
+    touch-action: none;
+    overflow: hidden;
+  }
+  .scrub-strip canvas { display: block; width: 100%; height: 100%; }
+  .scrub-strip .playhead {
+    position: absolute;
+    top: 0; bottom: 14px;
+    left: 50%;
+    width: 1px;
+    background: var(--ochre);
+    box-shadow: 0 0 6px rgba(201, 169, 107, 0.45);
+    pointer-events: none;
+  }
+
   /* clean scroll */
   .clean-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
   .clean-scroll::-webkit-scrollbar-thumb { background: rgba(245,240,230,0.12); border-radius: 2px; }
@@ -724,6 +775,33 @@ function extractDuration(item) {
   return 0;
 }
 
+// Parse a PSC timecode: "H:MM:SS(.ms)", "MM:SS(.ms)", or bare seconds.
+function parseTimecode(s) {
+  if (s == null) return NaN;
+  const str = String(s).trim();
+  if (!str) return NaN;
+  if (/^\d+(\.\d+)?$/.test(str)) return parseFloat(str);
+  const parts = str.split(':').map(x => parseFloat(x) || 0);
+  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+  if (parts.length === 2) return parts[0]*60 + parts[1];
+  return NaN;
+}
+
+// Podlove Simple Chapters: <psc:chapters><psc:chapter start="00:01:23" title="..."/></psc:chapters>
+// Returns [{start, title}] sorted by start, or [].
+function extractChapters(item) {
+  if (!item || typeof item.getElementsByTagNameNS !== 'function') return [];
+  const els = Array.from(item.getElementsByTagNameNS('*', 'chapter'))
+    .filter(el => el.localName === 'chapter' && el.getAttribute('start') != null);
+  if (!els.length) return [];
+  const out = els.map(el => ({
+    start: parseTimecode(el.getAttribute('start')),
+    title: (el.getAttribute('title') || '').trim(),
+  })).filter(c => Number.isFinite(c.start));
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
 function stripHtml(s) {
   if (!s) return '';
   const div = document.createElement('div');
@@ -862,6 +940,7 @@ function parseRSS(doc, feedUrl) {
       audioLength: enc?.length || null,
       duration: extractDuration(item),
       author: textOf(item, 'creator') || textOf(item, 'author'),
+      chapters: extractChapters(item),
     };
   });
 
@@ -904,6 +983,7 @@ function parseAtom(doc, feedUrl) {
       image: extractItemImage(entry, channelImg),
       audio: null, audioType: null, audioLength: null, duration: 0,
       author: textOf(entry, 'author'),
+      chapters: extractChapters(entry),
     };
   });
 
@@ -1849,6 +1929,17 @@ const fmtTime = (sec) => {
   return h > 0 ? `${h}:${m.toString().padStart(2,'0')}:${s}` : `${m}:${s}`;
 };
 
+// Compact human-readable duration for chapter labels: "45s", "8m", "1h 4m"
+const fmtMin = (sec) => {
+  if (!sec || sec < 0 || isNaN(sec)) return '';
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm ? `${h}h ${rm}m` : `${h}h`;
+};
+
 const fmtDate = (ts) => {
   if (!ts) return '';
   const d = new Date(ts);
@@ -2090,6 +2181,8 @@ const Icon = ({ name, size = 18, className = '', stroke = 1.6 }) => {
     case 'fwd-30':   return <svg {...props}><path d="M21 12a9 9 0 1 1-3.55-7.16"/><polyline points="21 4 21 10 15 10"/></svg>;
     case 'bwd-15':   return <svg {...props}><path d="M3 12a9 9 0 1 0 3.55-7.16"/><polyline points="3 4 3 10 9 10"/></svg>;
     case 'moon':     return <svg {...props}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>;
+    case 'sparkle':  return <svg {...props}><path d="M12 2 L13.4 9 L20 10.5 L13.4 12 L12 19 L10.6 12 L4 10.5 L10.6 9 Z" fill="currentColor" stroke="none"/><path d="M19 3 L19.6 5.5 L22 6 L19.6 6.5 L19 9 L18.4 6.5 L16 6 L18.4 5.5 Z" fill="currentColor" stroke="none"/><path d="M5 15 L5.6 17.2 L8 17.7 L5.6 18.2 L5 20.4 L4.4 18.2 L2 17.7 L4.4 17.2 Z" fill="currentColor" stroke="none"/></svg>;
+    case 'toc':      return <svg {...props}><path d="M3 5h7a3 3 0 0 1 3 3v12"/><path d="M21 5h-7a3 3 0 0 0-3 3"/><path d="M3 5v14h7"/><path d="M21 5v14h-7"/></svg>;
     case 'plus':     return <svg {...props}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
     case 'x':        return <svg {...props}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
     case 'check':    return <svg {...props}><polyline points="20 6 9 17 4 12" /></svg>;
@@ -2124,6 +2217,31 @@ const Icon = ({ name, size = 18, className = '', stroke = 1.6 }) => {
 
 const PlayerCtx = createContext(null);
 function usePlayer() { return useContext(PlayerCtx); }
+
+// Night mode: toggles an OLED-true-black variant of the dark theme.
+// Persisted in IDB.kv under 'ui.night' so it survives reloads.
+function useNightMode() {
+  const [on, setOn] = useState(() => document.documentElement.classList.contains('night'));
+  useEffect(() => {
+    let cancelled = false;
+    IDB.getKv('ui.night').then(v => {
+      if (cancelled) return;
+      const next = !!v;
+      document.documentElement.classList.toggle('night', next);
+      setOn(next);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const toggle = useCallback(() => {
+    setOn(prev => {
+      const next = !prev;
+      document.documentElement.classList.toggle('night', next);
+      IDB.setKv('ui.night', next).catch(() => {});
+      return next;
+    });
+  }, []);
+  return { on, toggle };
+}
 
 function PlayerProvider({ children }) {
   const audioRef = useRef(null);
@@ -3654,9 +3772,192 @@ function EpisodeRow({ item, hideShow = false, onOpen }) {
   );
 }
 
+// Libby-style chapter row: ◀ prev-dur | Chapter title / TOC | next-dur ▶
+// Shown only when the episode includes Podlove Simple Chapters in its RSS.
+function ChapterRow({ chapters, position, duration, onJump }) {
+  const [tocOpen, setTocOpen] = useState(false);
+  if (!chapters || !chapters.length) return null;
+  const idx = (() => {
+    for (let i = chapters.length - 1; i >= 0; i--) {
+      if (position >= chapters[i].start) return i;
+    }
+    return 0;
+  })();
+  const cur = chapters[idx];
+  const prev = chapters[idx - 1] || null;
+  const next = chapters[idx + 1] || null;
+  const nextStart = next ? next.start : (duration || cur.start);
+  const prevDur = prev ? Math.max(0, cur.start - prev.start) : null;
+  const nextDur = next ? Math.max(0, (chapters[idx + 2]?.start ?? duration) - next.start) : null;
+
+  return (
+    <div className="w-full mt-4">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          onClick={() => prev && onJump(prev.start)}
+          disabled={!prev}
+          className={`flex items-center gap-1 eo text-[11px] tabular-nums tap ${prev ? 'text-paper/70 hover:text-ochre' : 'text-paper/20 cursor-default'}`}
+          aria-label="previous chapter"
+        >
+          <span>◀</span>
+          <span>{prevDur != null ? fmtMin(prevDur) : '—'}</span>
+        </button>
+
+        <button
+          onClick={() => setTocOpen(o => !o)}
+          className="flex flex-col items-center text-center tap"
+          aria-label="table of contents"
+        >
+          <span className="text-[14px] sm:text-[15px] font-semibold leading-tight text-paper clamp-1 max-w-[60vw]">
+            {cur.title || `Chapter ${idx + 1}`}
+          </span>
+          <span className="eo text-[9px] uppercase tracking-[0.18em] text-paper/50 mt-0.5 flex items-center gap-1">
+            <Icon name="toc" size={10} /> table of contents
+          </span>
+        </button>
+
+        <button
+          onClick={() => next && onJump(next.start)}
+          disabled={!next}
+          className={`flex items-center gap-1 eo text-[11px] tabular-nums tap ${next ? 'text-paper/70 hover:text-ochre' : 'text-paper/20 cursor-default'}`}
+          aria-label="next chapter"
+        >
+          <span>{nextDur != null ? fmtMin(nextDur) : '—'}</span>
+          <span>▶</span>
+        </button>
+      </div>
+
+      {tocOpen && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setTocOpen(false)} />
+          <div className="relative z-40 mt-2 ink2 border border-paper/15 rounded-lg p-2 max-h-72 overflow-y-auto clean-scroll">
+            {chapters.map((c, i) => (
+              <button
+                key={i}
+                onClick={() => { onJump(c.start); setTocOpen(false); }}
+                className={`w-full flex items-center justify-between gap-3 px-2 py-1.5 rounded text-left tap ${i === idx ? 'bg-ochre/15 text-ochre' : 'text-paper hover:bg-paper/10'}`}
+              >
+                <span className="text-[12px] leading-tight clamp-1">{c.title || `Chapter ${i + 1}`}</span>
+                <span className="eo text-[10px] tabular-nums text-paper/50 flex-shrink-0">{fmtTime(c.start)}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Libby-style scrub strip: a horizontally draggable timeline with tick marks.
+// Camera centered on `position`, ±viewSec window. Drag = scrub.
+function ScrubStrip({ position, duration, onSeek }) {
+  const wrapRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [w, setW] = useState(0);
+  const [drag, setDrag] = useState(null); // {startX, startPos}
+  const viewSec = 30;
+
+  // Track container width via ResizeObserver (cheap; updates only on layout change).
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) setW(Math.floor(e.contentRect.width));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const displayPos = drag ? drag.previewPos : position;
+
+  // Repaint ticks whenever width or position changes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !w) return;
+    const dpr = window.devicePixelRatio || 1;
+    const h = canvas.clientHeight;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const pxPerSec = w / (viewSec * 2);
+    const center = w / 2;
+    const tickColor = 'rgba(239, 232, 214, 0.35)';
+    const labelColor = 'rgba(239, 232, 214, 0.55)';
+
+    const startSec = Math.max(0, Math.floor(displayPos - viewSec));
+    const endSec = (duration ? Math.min(duration, displayPos + viewSec) : displayPos + viewSec);
+
+    ctx.fillStyle = tickColor;
+    for (let s = startSec; s <= endSec; s++) {
+      const x = center + (s - displayPos) * pxPerSec;
+      if (x < 0 || x > w) continue;
+      const isMajor = s % 30 === 0;
+      const isMid = s % 5 === 0;
+      const tickH = isMajor ? 18 : isMid ? 10 : 5;
+      const yTop = h - 14 - tickH;
+      ctx.globalAlpha = isMajor ? 0.9 : isMid ? 0.55 : 0.3;
+      ctx.fillRect(Math.floor(x), yTop, 1, tickH);
+    }
+    ctx.globalAlpha = 1;
+
+    // Major timestamp labels (every 30s)
+    ctx.fillStyle = labelColor;
+    ctx.font = '10px "JetBrains Mono", ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const labelStart = startSec - (startSec % 30);
+    for (let s = labelStart; s <= endSec; s += 30) {
+      if (s < 0) continue;
+      const x = center + (s - displayPos) * pxPerSec;
+      if (x < 14 || x > w - 14) continue;
+      ctx.fillText(fmtTime(s), x, h - 1);
+    }
+  }, [w, displayPos, duration]);
+
+  // Pointer drag → scrub. Capture initial position so live timeupdate doesn't fight us.
+  const onPointerDown = (e) => {
+    if (!w) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setDrag({ startX: e.clientX, startPos: position, previewPos: position });
+  };
+  const onPointerMove = (e) => {
+    if (!drag) return;
+    const pxPerSec = w / (viewSec * 2);
+    const dx = e.clientX - drag.startX;
+    const ds = -dx / pxPerSec; // dragging right = move strip right = earlier time
+    const next = duration > 0
+      ? Math.max(0, Math.min(duration, drag.startPos + ds))
+      : Math.max(0, drag.startPos + ds);
+    setDrag(d => d ? { ...d, previewPos: next } : null);
+  };
+  const onPointerUp = () => {
+    if (!drag) return;
+    onSeek(drag.previewPos);
+    setDrag(null);
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      className="scrub-strip mt-3"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
+      <canvas ref={canvasRef} />
+      <div className="playhead" />
+    </div>
+  );
+}
+
 function EpisodeView({ item, onClose }) {
   const state = useStoreState();
   const player = usePlayer();
+  const night = useNightMode();
   const isCurrent = state.nowPlaying === item.id;
   const play = state.plays[item.id];
   const dur = (isCurrent ? player.duration : 0) || item.duration || 0;
@@ -3670,24 +3971,43 @@ function EpisodeView({ item, onClose }) {
 
   return (
     <div className="ink min-h-full fade-in">
-      <div className="sticky top-0 z-10 ink2 border-b border-paper/10 px-5 sm:px-8 py-4 flex items-center justify-between">
-        <button onClick={onClose} className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-paper tap">
-          ← back
-        </button>
-        <div className="flex items-center gap-5">
-          <button onClick={() => actionSave(item.id, isSaved)} className={`tap ${isSaved ? 'text-rust' : 'text-paper/60 hover:text-paper'}`}>
-            <Icon name={isSaved ? 'bookmark-fill' : 'bookmark'} size={18} />
+      <div className="sticky top-0 z-10 ink2 border-b border-paper/10">
+        <div className="px-5 sm:px-8 py-4 flex items-center justify-between">
+          <button onClick={onClose} className="eo text-[11px] uppercase tracking-[0.18em] text-paper/60 hover:text-paper tap">
+            ← back
           </button>
-          <button onClick={() => actionEnqueue(item.id, isQueued)} className={`tap ${isQueued ? 'text-moss' : 'text-paper/60 hover:text-paper'}`}>
-            <Icon name="queue" size={18} />
-          </button>
-          {item.audio && <DownloadButton item={item} size={18} />}
-          {item.link && (
-            <a href={item.link} target="_blank" rel="noopener" className="text-paper/60 hover:text-moss2 tap">
-              <Icon name="external" size={18} />
-            </a>
-          )}
+          <div className="flex items-center gap-5">
+            {isCurrent && (
+              <>
+                <SleepTimerControl sleep={player.sleep} />
+                <button
+                  onClick={night.toggle}
+                  aria-label="night mode"
+                  className={`tap ${night.on ? 'text-ochre' : 'text-paper/60 hover:text-paper'}`}
+                >
+                  <Icon name="moon" size={18} />
+                </button>
+              </>
+            )}
+            <button onClick={() => actionSave(item.id, isSaved)} className={`tap ${isSaved ? 'text-rust' : 'text-paper/60 hover:text-paper'}`}>
+              <Icon name={isSaved ? 'bookmark-fill' : 'bookmark'} size={18} />
+            </button>
+            <button onClick={() => actionEnqueue(item.id, isQueued)} className={`tap ${isQueued ? 'text-moss' : 'text-paper/60 hover:text-paper'}`}>
+              <Icon name="queue" size={18} />
+            </button>
+            {item.audio && <DownloadButton item={item} size={18} />}
+            {item.link && (
+              <a href={item.link} target="_blank" rel="noopener" className="text-paper/60 hover:text-moss2 tap">
+                <Icon name="external" size={18} />
+              </a>
+            )}
+          </div>
         </div>
+        {isCurrent && (
+          <div className="h-[2px] bg-paper/8 relative">
+            <div className="absolute inset-y-0 left-0 bg-ochre" style={{ width: `${pct}%`, boxShadow: '0 0 8px rgba(201, 169, 107, 0.4)' }} />
+          </div>
+        )}
       </div>
 
       <article className="px-5 sm:px-8 py-10 sm:py-14 max-w-2xl mx-auto">
@@ -3706,51 +4026,55 @@ function EpisodeView({ item, onClose }) {
 
         <div className="mb-12">
           {isCurrent ? (
-            <div className="max-w-md mx-auto">
-              <div className="mb-1">
-                <input
-                  type="range"
-                  className="seek"
-                  min="0"
-                  max={dur || 0}
-                  value={player.position || 0}
-                  onChange={(e) => player.seekTo(parseFloat(e.target.value))}
-                />
-              </div>
-              <div className="flex justify-between eo text-[10px] text-mute tabular-nums mb-5">
+            <div className="max-w-md mx-auto flex flex-col items-center">
+              {/* time row: position | percent | -remaining */}
+              <div className="w-full flex justify-between items-center eo text-[11px] text-paper/70 tabular-nums px-1">
                 <span>{fmtTime(player.position)}</span>
+                <span className="text-paper/55">{Math.round(pct)}%</span>
                 <span>−{fmtTime(Math.max(0, dur - player.position))}</span>
               </div>
 
-              <div className="flex items-center justify-center gap-6 mb-4">
-                <button onClick={() => player.seek(-15)} className="text-paper hover:text-moss tap relative">
-                  <Icon name="bwd-15" size={26} />
-                  <span className="absolute inset-0 flex items-center justify-center eo text-[8px] mt-1">15</span>
+              {/* circular tan controls */}
+              <div className="flex items-center gap-10 mt-7 mb-2">
+                <button onClick={() => player.seek(-15)} className="libby-circle tap" aria-label="back 15 seconds">
+                  <Icon name="bwd-15" size={22} />
+                  <span className="absolute inset-0 grid place-items-center eo text-[8px] mt-0.5 pointer-events-none">15</span>
                 </button>
-                <button onClick={() => player.toggle()} className="w-16 h-16 rounded-full bg-moss text-ink flex items-center justify-center tap shadow-xl shadow-moss/25 hover:scale-105 transition-transform">
-                  <Icon name={player.playing ? 'pause' : 'play'} size={22} />
+                <button onClick={() => player.toggle()} className="libby-circle primary tap" aria-label={player.playing ? 'pause' : 'play'}>
+                  <Icon name={player.playing ? 'pause' : 'play'} size={26} />
                 </button>
-                <button onClick={() => player.seek(30)} className="text-paper hover:text-moss tap relative">
-                  <Icon name="fwd-30" size={26} />
-                  <span className="absolute inset-0 flex items-center justify-center eo text-[8px] mt-1">30</span>
+                <button onClick={() => player.seek(30)} className="libby-circle tap" aria-label="forward 30 seconds">
+                  <Icon name="fwd-30" size={22} />
+                  <span className="absolute inset-0 grid place-items-center eo text-[8px] mt-0.5 pointer-events-none">30</span>
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              {/* chapter row — only when PSC chapters exist */}
+              {item.chapters && item.chapters.length > 0 && (
+                <ChapterRow
+                  chapters={item.chapters}
+                  position={player.position}
+                  duration={dur}
+                  onJump={player.seekTo}
+                />
+              )}
+
+              {/* libby-style scroll scrubber */}
+              <ScrubStrip position={player.position} duration={dur} onSeek={player.seekTo} />
+
+              {/* secondary row: speed buttons + played toggle */}
+              <div className="w-full flex items-center justify-between mt-5">
                 <div className="flex items-center gap-2">
                   {[1, 1.25, 1.5, 1.75, 2].map(r => (
                     <button key={r} onClick={() => player.setSpeed(r)}
-                      className={`eo text-[10px] px-1.5 py-0.5 ${player.rate === r ? 'text-moss border-b border-moss' : 'text-mute hover:text-paper'} tap`}>
+                      className={`eo text-[10px] px-1.5 py-0.5 ${player.rate === r ? 'text-ochre border-b border-ochre' : 'text-mute hover:text-paper'} tap`}>
                       {r}×
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center gap-3">
-                  <SleepTimerControl sleep={player.sleep} />
-                  <button onClick={() => actionTogglePlayed(item.id)} className={`tap ${play?.played ? 'text-sage' : 'text-mute hover:text-paper'}`}>
-                    <Icon name="check" size={16} />
-                  </button>
-                </div>
+                <button onClick={() => actionTogglePlayed(item.id)} className={`tap ${play?.played ? 'text-sage' : 'text-mute hover:text-paper'}`} aria-label="mark played">
+                  <Icon name="check" size={16} />
+                </button>
               </div>
             </div>
           ) : (
@@ -3959,10 +4283,10 @@ function SleepTimerControl({ sleep }) {
     <div className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className={`tap flex items-center gap-1.5 ${active ? 'text-moss' : 'text-mute hover:text-paper'}`}
+        className={`tap flex items-center gap-1.5 ${active ? 'text-ochre' : 'text-paper/60 hover:text-paper'}`}
         aria-label="Sleep timer"
       >
-        <Icon name="moon" size={16} />
+        <Icon name="sparkle" size={18} />
         {sleep.endsAt && (
           <span className="eo text-[10px] tabular-nums">{fmtSleepRemaining(sleep.remainingSec)}</span>
         )}
