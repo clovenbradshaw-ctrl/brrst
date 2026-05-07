@@ -2248,6 +2248,7 @@ function PlayerProvider({ children }) {
   const playTokenRef = useRef(0);     // supersedes in-flight loads when switching items
   const pendingSeekRef = useRef(null); // applied once metadata loads (iOS can't seek before)
   const blobUrlRef = useRef(null);     // tracks the current blob: URL so we can revoke it
+  const currentItemIdRef = useRef(null); // item id whose source is currently loaded (lets playItem skip a reload+blob churn when the same episode is re-tapped)
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -2288,6 +2289,16 @@ function PlayerProvider({ children }) {
       if (t == null) return;
       try { audio.currentTime = t; } catch {}
     };
+    // Audio element errors (decode, network, src-not-supported, aborted)
+    // otherwise stick: readyState stays 0 and audio.error is set, so any
+    // later play() rejects without ever reloading. Drop the loaded-item id
+    // so the next playItem call takes the slow path and re-fetches src.
+    const onError = () => {
+      const err = audio.error;
+      console.warn('[player] audio error', err?.code, err?.message || '', audio.currentSrc || audio.src);
+      currentItemIdRef.current = null;
+      setPlaying(false);
+    };
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('loadedmetadata', onDur);
     audio.addEventListener('loadedmetadata', onLoaded);
@@ -2295,6 +2306,7 @@ function PlayerProvider({ children }) {
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('ended', onEnd);
+    audio.addEventListener('error', onError);
     return () => {
       audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('loadedmetadata', onDur);
@@ -2303,6 +2315,7 @@ function PlayerProvider({ children }) {
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('ended', onEnd);
+      audio.removeEventListener('error', onError);
     };
   }, []);
 
@@ -2334,8 +2347,36 @@ function PlayerProvider({ children }) {
     const finished = item.duration > 0 && saved >= item.duration - 5;
     const startAt = (opts.restart || finished) ? 0 : saved;
 
-    // Prefer a cached download (offline-first), fall back to the network URL.
-    // Note: when the saved blob is stale, getBlob evicts it and returns null.
+    // Fast path: same item already loaded and the element is healthy. Skip
+    // the IDB read + blob URL re-creation + audio.load() — those reset the
+    // network/buffer state and are what makes repeat taps (or returning to
+    // an episode mid-play) feel unreliable. We only re-seek if needed.
+    const sameItemHealthy = currentItemIdRef.current === item.id
+      && audio.src
+      && !audio.error
+      && audio.readyState > 0;
+
+    if (sameItemHealthy) {
+      audio.playbackRate = rate;
+      const dur = audio.duration || 0;
+      const atEnd = audio.ended || (dur > 0 && audio.currentTime >= dur - 0.25);
+      try {
+        if (opts.restart || atEnd || finished) {
+          audio.currentTime = 0;
+        } else if (Math.abs((audio.currentTime || 0) - startAt) > 0.25) {
+          audio.currentTime = startAt;
+        }
+      } catch {}
+      try { await audio.play(); }
+      catch (e) { console.warn('[player] play failed (resume)', e); return; }
+      if (token !== playTokenRef.current) return;
+      await actionSetPlaying(item.id);
+      return;
+    }
+
+    // Slow path: first play of this item, item switch, or recovery from an
+    // audio error. Resolve a cached blob if we have one (offline-first),
+    // otherwise hit the network URL.
     let srcUrl = item.audio;
     let nextBlobUrl = null;
     try {
@@ -2352,42 +2393,25 @@ function PlayerProvider({ children }) {
       return;
     }
 
-    let absUrl = srcUrl;
-    try { absUrl = new URL(srcUrl, location.href).href; } catch {}
-    const sameSource = audio.src === absUrl || audio.currentSrc === absUrl;
-
-    if (!sameSource) {
-      // releasing the previous blob URL (if any) prevents slow IDB-blob leaks
-      if (blobUrlRef.current && blobUrlRef.current !== nextBlobUrl) {
-        URL.revokeObjectURL(blobUrlRef.current);
-      }
-      blobUrlRef.current = nextBlobUrl;
-      audio.src = srcUrl;
-      // Kick off buffering immediately. Without this, iOS PWA waits for the
-      // play() call before initiating the network request, which is the main
-      // contributor to "slow audio start" in standalone mode.
-      try { audio.load(); } catch {}
-    } else if (nextBlobUrl) {
-      // we created a blob URL but didn't end up needing it
-      URL.revokeObjectURL(nextBlobUrl);
+    if (blobUrlRef.current && blobUrlRef.current !== nextBlobUrl) {
+      URL.revokeObjectURL(blobUrlRef.current);
     }
+    blobUrlRef.current = nextBlobUrl;
+    audio.src = srcUrl;
+    currentItemIdRef.current = item.id;
+    // Kick off buffering immediately. Without this, iOS PWA waits for the
+    // play() call before initiating the network request, which is the main
+    // contributor to "slow audio start" in standalone mode.
+    try { audio.load(); } catch {}
     audio.playbackRate = rate;
 
-    // Seek when we can: if metadata's already loaded (same-source case), do
-    // it now; otherwise queue for the loadedmetadata listener.
-    if (audio.readyState >= 1 /* HAVE_METADATA */) {
-      try {
-        if (Math.abs((audio.currentTime || 0) - startAt) > 0.25) {
-          audio.currentTime = startAt;
-        }
-      } catch {}
-      pendingSeekRef.current = null;
-    } else {
-      pendingSeekRef.current = startAt;
-    }
+    // Metadata is not loaded yet (we just called load), so queue the seek
+    // for the loadedmetadata listener. iOS drops currentTime writes before
+    // HAVE_METADATA.
+    pendingSeekRef.current = startAt;
 
     try { await audio.play(); }
-    catch (e) { console.warn('play failed', e); }
+    catch (e) { console.warn('[player] play failed (load)', e); }
 
     if (token !== playTokenRef.current) return; // user moved on; don't clobber state
 
@@ -2408,24 +2432,25 @@ function PlayerProvider({ children }) {
   const resumeOrLoad = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    // PWA recovery: when iOS evicts the audio element's source after long
-    // backgrounding, audio.src is empty / readyState 0. Reload from the
-    // store so the play button works without forcing the user to switch
-    // episodes.
-    if (!audio.src || audio.readyState === 0) {
+    // Reload from the store when:
+    //  - iOS PWA evicted the source after long backgrounding (src empty / readyState 0)
+    //  - the element is in an error state (a previous load failed)
+    // Without the audio.error branch, tapping play after a failed load just
+    // re-calls play() on the broken element and silently fails again.
+    if (!audio.src || audio.readyState === 0 || audio.error) {
       const np = store.state.nowPlaying;
       const it = np ? store.state.items[np] : null;
       if (it?.audio) playItem(it).catch(() => {});
       return;
     }
-    audio.play().catch(e => console.warn('play failed', e));
+    audio.play().catch(e => console.warn('[player] play failed', e));
   }, [playItem]);
 
   const toggle = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (!audio.src || audio.readyState === 0) {
+    if (!audio.src || audio.readyState === 0 || audio.error) {
       resumeOrLoad();
       return;
     }
@@ -2434,12 +2459,12 @@ function PlayerProvider({ children }) {
     const dur = audio.duration || 0;
     if (audio.ended || (dur > 0 && audio.currentTime >= dur - 0.25)) {
       try { audio.currentTime = 0; } catch {}
-      audio.play().catch(e => console.warn('restart failed', e));
+      audio.play().catch(e => console.warn('[player] restart failed', e));
       return;
     }
 
     if (audio.paused) {
-      audio.play().catch(e => console.warn('play failed', e));
+      audio.play().catch(e => console.warn('[player] play failed', e));
     } else {
       audio.pause();
     }
@@ -2448,14 +2473,14 @@ function PlayerProvider({ children }) {
   const restart = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (!audio.src || audio.readyState === 0) {
+    if (!audio.src || audio.readyState === 0 || audio.error) {
       const np = store.state.nowPlaying;
       const it = np ? store.state.items[np] : null;
       if (it?.audio) playItem(it, { restart: true }).catch(() => {});
       return;
     }
     try { audio.currentTime = 0; } catch {}
-    audio.play().catch(e => console.warn('restart failed', e));
+    audio.play().catch(e => console.warn('[player] restart failed', e));
   }, [playItem]);
 
   const seek = useCallback((delta) => {
