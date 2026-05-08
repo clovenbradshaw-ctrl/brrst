@@ -2331,6 +2331,15 @@ function PlayerProvider({ children }) {
     // on the next successful 'play' event.
     const recover = (reason) => {
       if (!userPlayIntentRef.current) return;
+      // While the page is hidden, audio.play() generally rejects under the
+      // browser's autoplay policy and audio.load() often stalls. Burning the
+      // retry budget here means nothing's left when the user foregrounds the
+      // app. The visibilitychange handler resets the counter and retries on
+      // its own, so just defer until then.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        console.info(`[player] deferring recover (${reason}) — page hidden`);
+        return;
+      }
       if (errorRetryCountRef.current >= 3) {
         console.warn('[player] giving up after 3 recoveries:', reason);
         return;
@@ -2403,6 +2412,19 @@ function PlayerProvider({ children }) {
       if (!userPlayIntentRef.current) return;
       const audio = audioRef.current;
       if (!audio) return;
+      // Fresh retry budget on return. Any retries we tried while hidden were
+      // doomed to fail (the browser blocks audio.play() in the background),
+      // so they shouldn't count against the foreground recovery now that
+      // playback can actually resume.
+      errorRetryCountRef.current = 0;
+      if (errorRetryTimerRef.current) {
+        clearTimeout(errorRetryTimerRef.current);
+        errorRetryTimerRef.current = null;
+      }
+      if (stalledTimerRef.current) {
+        clearTimeout(stalledTimerRef.current);
+        stalledTimerRef.current = null;
+      }
       const dead = !audio.src || audio.readyState === 0 || audio.error;
       if (!dead && !audio.paused) return; // already playing — nothing to do
       const np = store.state.nowPlaying;
