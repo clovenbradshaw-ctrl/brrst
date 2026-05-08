@@ -2260,6 +2260,17 @@ function PlayerProvider({ children }) {
   const pendingSeekRef = useRef(null); // applied once metadata loads (iOS can't seek before)
   const blobUrlRef = useRef(null);     // tracks the current blob: URL so we can revoke it
   const currentItemIdRef = useRef(null); // item id whose source is currently loaded (lets playItem skip a reload+blob churn when the same episode is re-tapped)
+  // User intent (play vs pause) tracked separately from the element's transient
+  // state. The element flips to paused on errors, source eviction, network
+  // hiccups, etc. — none of which mean the user wanted to stop. We use this to
+  // decide whether to auto-resume when the audio dies.
+  const userPlayIntentRef = useRef(false);
+  const errorRetryCountRef = useRef(0);
+  const errorRetryTimerRef = useRef(null);
+  const stalledTimerRef = useRef(null);
+  // Late-bound playItem ref so the listener effect (which has empty deps and
+  // can't see the latest playItem closure) can still trigger auto-recovery.
+  const playItemRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -2289,9 +2300,23 @@ function PlayerProvider({ children }) {
     if (!audio) return;
     const onTime = () => setPosition(audio.currentTime || 0);
     const onDur  = () => setDuration(audio.duration || 0);
-    const onPlay = () => setPlaying(true);
+    const onPlay = () => {
+      setPlaying(true);
+      // Successful playback resets the recovery budget so the next outage
+      // gets a fresh round of retries.
+      errorRetryCountRef.current = 0;
+      if (stalledTimerRef.current) {
+        clearTimeout(stalledTimerRef.current);
+        stalledTimerRef.current = null;
+      }
+    };
     const onPause = () => setPlaying(false);
-    const onEnd = () => setPlaying(false);
+    const onEnd = () => {
+      // Natural episode end isn't an outage — clear intent so we don't try
+      // to auto-resume on the next visibility change.
+      userPlayIntentRef.current = false;
+      setPlaying(false);
+    };
     // Apply queued seek as soon as the browser admits it. iOS in particular
     // ignores currentTime writes until HAVE_METADATA, so playItem queues here.
     const onLoaded = () => {
@@ -2300,15 +2325,45 @@ function PlayerProvider({ children }) {
       if (t == null) return;
       try { audio.currentTime = t; } catch {}
     };
-    // Audio element errors (decode, network, src-not-supported, aborted)
-    // otherwise stick: readyState stays 0 and audio.error is set, so any
-    // later play() rejects without ever reloading. Drop the loaded-item id
-    // so the next playItem call takes the slow path and re-fetches src.
+    // Auto-recover on transient outages so audio doesn't stay dead until the
+    // user notices and taps play. Bounded retries (3) prevent looping on a
+    // genuinely broken source (404, decode error). The retry counter resets
+    // on the next successful 'play' event.
+    const recover = (reason) => {
+      if (!userPlayIntentRef.current) return;
+      if (errorRetryCountRef.current >= 3) {
+        console.warn('[player] giving up after 3 recoveries:', reason);
+        return;
+      }
+      errorRetryCountRef.current += 1;
+      const delayMs = 400 * Math.pow(2, errorRetryCountRef.current - 1); // 400ms, 800ms, 1.6s
+      const np = store.state.nowPlaying;
+      const it = np ? store.state.items[np] : null;
+      if (!it?.audio) return;
+      console.info(`[player] auto-recover (${reason}, attempt ${errorRetryCountRef.current}) in ${delayMs}ms`);
+      if (errorRetryTimerRef.current) clearTimeout(errorRetryTimerRef.current);
+      errorRetryTimerRef.current = setTimeout(() => {
+        errorRetryTimerRef.current = null;
+        playItemRef.current?.(it).catch(e => console.warn('[player] recover failed', e));
+      }, delayMs);
+    };
     const onError = () => {
       const err = audio.error;
       console.warn('[player] audio error', err?.code, err?.message || '', audio.currentSrc || audio.src);
       currentItemIdRef.current = null;
       setPlaying(false);
+      recover('error');
+    };
+    // 'stalled' fires when the browser is trying to fetch data but nothing's
+    // arriving. Give it a few seconds to recover on its own; if playback
+    // hasn't resumed, treat it like an error and reload.
+    const onStalled = () => {
+      if (!userPlayIntentRef.current) return;
+      if (stalledTimerRef.current) return;
+      stalledTimerRef.current = setTimeout(() => {
+        stalledTimerRef.current = null;
+        if (audio.paused && userPlayIntentRef.current) recover('stalled');
+      }, 6000);
     };
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('loadedmetadata', onDur);
@@ -2318,6 +2373,7 @@ function PlayerProvider({ children }) {
     audio.addEventListener('pause', onPause);
     audio.addEventListener('ended', onEnd);
     audio.addEventListener('error', onError);
+    audio.addEventListener('stalled', onStalled);
     return () => {
       audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('loadedmetadata', onDur);
@@ -2327,6 +2383,43 @@ function PlayerProvider({ children }) {
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('ended', onEnd);
       audio.removeEventListener('error', onError);
+      audio.removeEventListener('stalled', onStalled);
+      if (errorRetryTimerRef.current) {
+        clearTimeout(errorRetryTimerRef.current);
+        errorRetryTimerRef.current = null;
+      }
+      if (stalledTimerRef.current) {
+        clearTimeout(stalledTimerRef.current);
+        stalledTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // iOS PWA evicts audio sources after backgrounding. When the page comes
+  // back to the foreground, restore playback if the user still wants it.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!userPlayIntentRef.current) return;
+      const audio = audioRef.current;
+      if (!audio) return;
+      const dead = !audio.src || audio.readyState === 0 || audio.error;
+      if (!dead && !audio.paused) return; // already playing — nothing to do
+      const np = store.state.nowPlaying;
+      const it = np ? store.state.items[np] : null;
+      if (!it?.audio) return;
+      if (dead) {
+        playItemRef.current?.(it).catch(e => console.warn('[player] visibility recover failed', e));
+      } else if (audio.paused) {
+        // Element survived backgrounding but paused — resume.
+        audio.play().catch(e => console.warn('[player] visibility resume failed', e));
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onVisibility);
     };
   }, []);
 
@@ -2348,6 +2441,9 @@ function PlayerProvider({ children }) {
     const audio = audioRef.current;
     if (!audio) return;
 
+    // User pressed play — record intent so auto-recovery kicks in if the
+    // element later errors or backgrounds out.
+    userPlayIntentRef.current = true;
     // New play supersedes any in-flight loadedmetadata-deferred seeks.
     const token = ++playTokenRef.current;
 
@@ -2440,9 +2536,14 @@ function PlayerProvider({ children }) {
     }
   }, [rate]);
 
+  // Keep the late-bound ref current so listener callbacks (which capture an
+  // empty-deps useEffect) can always invoke the latest playItem closure.
+  useEffect(() => { playItemRef.current = playItem; }, [playItem]);
+
   const resumeOrLoad = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    userPlayIntentRef.current = true;
     // Reload from the store when:
     //  - iOS PWA evicted the source after long backgrounding (src empty / readyState 0)
     //  - the element is in an error state (a previous load failed)
@@ -2469,14 +2570,18 @@ function PlayerProvider({ children }) {
     // At end of track: tapping play should restart from 0, not no-op.
     const dur = audio.duration || 0;
     if (audio.ended || (dur > 0 && audio.currentTime >= dur - 0.25)) {
+      userPlayIntentRef.current = true;
       try { audio.currentTime = 0; } catch {}
       audio.play().catch(e => console.warn('[player] restart failed', e));
       return;
     }
 
     if (audio.paused) {
+      userPlayIntentRef.current = true;
       audio.play().catch(e => console.warn('[player] play failed', e));
     } else {
+      // Explicit user pause — don't auto-resume on visibility/error events.
+      userPlayIntentRef.current = false;
       audio.pause();
     }
   }, [resumeOrLoad]);
@@ -2484,6 +2589,7 @@ function PlayerProvider({ children }) {
   const restart = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    userPlayIntentRef.current = true;
     if (!audio.src || audio.readyState === 0 || audio.error) {
       const np = store.state.nowPlaying;
       const it = np ? store.state.items[np] : null;
@@ -2519,7 +2625,10 @@ function PlayerProvider({ children }) {
     const ms = navigator.mediaSession;
     try {
       ms.setActionHandler('play', () => resumeOrLoad());
-      ms.setActionHandler('pause', () => audioRef.current?.pause());
+      ms.setActionHandler('pause', () => {
+        userPlayIntentRef.current = false;
+        audioRef.current?.pause();
+      });
       ms.setActionHandler('seekbackward', (e) => seek(-(e?.seekOffset || 15)));
       ms.setActionHandler('seekforward', (e) => seek(e?.seekOffset || 30));
       try { ms.setActionHandler('seekto', (e) => { if (e?.seekTime != null) seekTo(e.seekTime); }); } catch {}
@@ -2549,6 +2658,9 @@ function PlayerProvider({ children }) {
     const tick = () => {
       const remainMs = sleepEndsAt - Date.now();
       if (remainMs <= 0) {
+        // Sleep timer expiry is an intentional stop — clear intent so the
+        // visibility / error recovery paths don't override it.
+        userPlayIntentRef.current = false;
         try { audioRef.current?.pause(); } catch {}
         setSleepEndsAt(null);
         setSleepRemainingSec(0);
