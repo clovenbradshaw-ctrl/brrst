@@ -2220,7 +2220,14 @@ const Icon = ({ name, size = 18, className = '', stroke = 1.6 }) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const PlayerCtx = createContext(null);
+// Position/duration tick ~4×/sec from the audio element's timeupdate. Keeping
+// them in the main player context forces every usePlayer() consumer (every
+// EpisodeRow on screen) to re-render at that rate, which on iOS PWA freezes
+// the UI mid-playback. Components that only need controls/playing read from
+// PlayerCtx; the few that draw the scrubber pull from PlayerProgressCtx.
+const PlayerProgressCtx = createContext({ position: 0, duration: 0 });
 function usePlayer() { return useContext(PlayerCtx); }
+function usePlayerProgress() { return useContext(PlayerProgressCtx); }
 
 // Night mode: toggles an OLED-true-black variant of the dark theme.
 // Persisted in IDB.kv under 'ui.night' so it survives reloads.
@@ -2583,9 +2590,20 @@ function PlayerProvider({ children }) {
     },
   }), [sleepEndsAt, sleepUntilEndOfEpisode, sleepRemainingSec]);
 
+  // Memoize so the high-frequency position/duration updates don't churn the
+  // identity of the controls value — that's what was causing every EpisodeRow
+  // to re-render 4×/sec.
+  const playerValue = useMemo(
+    () => ({ playing, rate, playItem, toggle, seek, seekTo, setSpeed, restart, sleep }),
+    [playing, rate, playItem, toggle, seek, seekTo, setSpeed, restart, sleep]
+  );
+  const progressValue = useMemo(() => ({ position, duration }), [position, duration]);
+
   return (
-    <PlayerCtx.Provider value={{ playing, position, duration, rate, playItem, toggle, seek, seekTo, setSpeed, restart, sleep }}>
-      {children}
+    <PlayerCtx.Provider value={playerValue}>
+      <PlayerProgressCtx.Provider value={progressValue}>
+        {children}
+      </PlayerProgressCtx.Provider>
     </PlayerCtx.Provider>
   );
 }
@@ -3986,11 +4004,12 @@ function ScrubStrip({ position, duration, onSeek }) {
 function EpisodeView({ item, onClose }) {
   const state = useStoreState();
   const player = usePlayer();
+  const progress = usePlayerProgress();
   const night = useNightMode();
   const isCurrent = state.nowPlaying === item.id;
   const play = state.plays[item.id];
-  const dur = (isCurrent ? player.duration : 0) || item.duration || 0;
-  const pos = isCurrent ? player.position : (play?.positionSec || 0);
+  const dur = (isCurrent ? progress.duration : 0) || item.duration || 0;
+  const pos = isCurrent ? progress.position : (play?.positionSec || 0);
   const pct = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
   const isSaved = !!state.saved[item.id];
   const isQueued = state.queue.includes(item.id);
@@ -4058,9 +4077,9 @@ function EpisodeView({ item, onClose }) {
             <div className="max-w-md mx-auto flex flex-col items-center">
               {/* time row: position | percent | -remaining */}
               <div className="w-full flex justify-between items-center eo text-[11px] text-paper/70 tabular-nums px-1">
-                <span>{fmtTime(player.position)}</span>
+                <span>{fmtTime(progress.position)}</span>
                 <span className="text-paper/55">{Math.round(pct)}%</span>
-                <span>−{fmtTime(Math.max(0, dur - player.position))}</span>
+                <span>−{fmtTime(Math.max(0, dur - progress.position))}</span>
               </div>
 
               {/* circular tan controls */}
@@ -4082,14 +4101,14 @@ function EpisodeView({ item, onClose }) {
               {item.chapters && item.chapters.length > 0 && (
                 <ChapterRow
                   chapters={item.chapters}
-                  position={player.position}
+                  position={progress.position}
                   duration={dur}
                   onJump={player.seekTo}
                 />
               )}
 
               {/* libby-style scroll scrubber */}
-              <ScrubStrip position={player.position} duration={dur} onSeek={player.seekTo} />
+              <ScrubStrip position={progress.position} duration={dur} onSeek={player.seekTo} />
 
               {/* secondary row: speed buttons + played toggle */}
               <div className="w-full flex items-center justify-between mt-5">
@@ -4367,14 +4386,15 @@ function SleepTimerControl({ sleep }) {
 function PlayerBar({ viewingNowPlaying }) {
   const state = useStoreState();
   const player = usePlayer();
+  const progress = usePlayerProgress();
   const [expanded, setExpanded] = useState(false);
 
   const item = state.nowPlaying ? state.items[state.nowPlaying] : null;
   if (!item) return null;
   if (viewingNowPlaying) return null;
 
-  const dur = player.duration || item.duration || 0;
-  const pct = dur > 0 ? (player.position / dur) * 100 : 0;
+  const dur = progress.duration || item.duration || 0;
+  const pct = dur > 0 ? (progress.position / dur) * 100 : 0;
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-30 ink2 border-t border-paper/15 backdrop-blur" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
@@ -4419,13 +4439,13 @@ function PlayerBar({ viewingNowPlaying }) {
               className="seek"
               min="0"
               max={dur || 0}
-              value={player.position || 0}
+              value={progress.position || 0}
               onChange={(e) => player.seekTo(parseFloat(e.target.value))}
             />
           </div>
           <div className="flex justify-between eo text-[10px] text-mute tabular-nums mb-3">
-            <span>{fmtTime(player.position)}</span>
-            <span>−{fmtTime(Math.max(0, dur - player.position))}</span>
+            <span>{fmtTime(progress.position)}</span>
+            <span>−{fmtTime(Math.max(0, dur - progress.position))}</span>
           </div>
 
           {/* Controls */}
