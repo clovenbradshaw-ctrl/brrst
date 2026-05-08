@@ -516,13 +516,17 @@ const IDB = (() => {
       const store = t.objectStore('log');
       for (const ev of events) store.put(ev);
     }),
-    readLog: async (limit = 1000) => {
+    // Read events from the log. Pass a limit only when you want a tail
+    // window (e.g. recent activity). For state hydration, read unbounded —
+    // truncating to the last N events evicts older INS feeds events and
+    // silently loses subscriptions on the next reload.
+    readLog: async (limit) => {
       const db = await open();
       return new Promise((res, rej) => {
         const t = db.transaction(['log'], 'readonly');
         const store = t.objectStore('log');
         const req = store.getAll();
-        req.onsuccess = () => res(req.result.slice(-limit));
+        req.onsuccess = () => res(limit ? req.result.slice(-limit) : req.result);
         req.onerror = () => rej(req.error);
       });
     },
@@ -1733,7 +1737,7 @@ class Store {
   }
 
   async hydrate() {
-    const log = await IDB.readLog(5000);
+    const log = await IDB.readLog();
     if (log.length > 0) {
       _seqCounter = Math.max(...log.map(e => e.seq), 0);
       this.state = replay(log);
