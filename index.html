@@ -1778,12 +1778,23 @@ class Store {
     this.recentEvents = [...this.recentEvents.slice(-49), ev];
     this._eventsSinceSnapshot += 1;
     this._emit();
-    this._scheduleShip();
+    this._scheduleShip(ev);
     return ev;
   }
 
-  _scheduleShip() {
-    if (this._eventsSinceSnapshot >= CONFIG.SNAPSHOT_EVERY_N_EVENTS) {
+  // Critical events are user-driven structural changes (subscribe, unsubscribe,
+  // feed-kind reclassify) that the user expects to persist across devices.
+  // Shipping them on the next tick — rather than waiting for the 5-minute
+  // batch timer — closes the "I subscribed and quit before sync" race.
+  _isCritical(ev) {
+    if (!ev) return false;
+    if (ev.site === 'feeds' && (ev.op === OP.INS || ev.op === OP.DES)) return true;
+    return false;
+  }
+
+  _scheduleShip(ev) {
+    const critical = this._isCritical(ev);
+    if (critical || this._eventsSinceSnapshot >= CONFIG.SNAPSHOT_EVERY_N_EVENTS) {
       this._eventsSinceSnapshot = 0;
       queueMicrotask(() => this.shipSnapshot().catch(e => console.warn('snapshot ship failed', e)));
     }
@@ -5207,6 +5218,11 @@ function App() {
         try {
           await Matrix.ensureUserRoom();
           if ((await IDB.maxSeq()) === 0) await store.hydrateFromMatrix();
+          // Flush any outbox events left over from a previous session — e.g.
+          // the user subscribed offline or the tab closed before the 5-min
+          // batch timer fired. Without this, those subscriptions never reach
+          // Matrix and other devices stay out of date.
+          store.shipSnapshot().catch((e) => console.warn('boot flush failed', e));
         } catch (e) { console.warn(e); }
       }
       // open the genesis NUL event if log is empty
@@ -5320,6 +5336,17 @@ function AppInner({ drawer, setDrawer }) {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
+
+// Last-ditch outbox flush. The 5-minute snapshot timer can't help users on
+// mobile who subscribe and immediately lock the screen — pagehide fires when
+// Safari is about to evict the tab, and visibilitychange→hidden covers the
+// same case for desktop tab-switching. shipSnapshot is idempotent and bails
+// quickly when the outbox is empty or Matrix isn't logged in.
+const flushOutbox = () => { store.shipSnapshot().catch(() => {}); };
+window.addEventListener('pagehide', flushOutbox);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushOutbox();
+});
 
 // expose for console debugging
 window.brrst = { store, IDB, Matrix, Downloads, OP, OP_GLYPH, makeEvent, fold, replay, fetchFeed, parseFeed };
